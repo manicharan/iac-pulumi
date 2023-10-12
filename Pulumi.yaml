@@ -1,0 +1,4 @@
+name: quickstart
+runtime: java
+description: A minimal AWS Java Pulumi program
+
