@@ -1,5 +1,6 @@
 package myproject;
 
+import com.pulumi.Config;
 import com.pulumi.Context;
 import com.pulumi.Pulumi;
 import com.pulumi.aws.AwsFunctions;
@@ -7,7 +8,6 @@ import com.pulumi.aws.ec2.*;
 import com.pulumi.aws.inputs.GetAvailabilityZonesArgs;
 import com.pulumi.aws.outputs.GetAvailabilityZonesResult;
 import com.pulumi.aws.outputs.GetRegionResult;
-import com.pulumi.core.Output;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -27,7 +27,14 @@ public class App {
 
         String vpcName = config.require("vpcName");
         String cidr = config.require("cidrBlock");
-        String igwName = config.require("igwName");
+        String igwName = config.require("internetGatewayName");
+        String publicRT = config.require("publicRouteTable");
+        String privateRt = config.require("privateRouteTable");
+        String publicRtAssociation = config.require("publicRouteTableAssociation");
+        String privateRtAssociation = config.require("privateRouteTableAssociation");
+        String publicRouteAll = config.require("publicRoute");
+        String destinationCidrPublic = config.require("destinationCidrPublic");
+        int num_of_subnets = Integer.parseInt(config.require("num_of_subnets"));
 
         // Create a VPC
         var vpc = new Vpc(vpcName, VpcArgs.builder()
@@ -42,70 +49,62 @@ public class App {
                 .tags(Map.of("Name", igwName))
                 .build());
 
-        // Generate Subnets
+        // Create Subnets
         var availabilityZones = AwsFunctions.getAvailabilityZones(GetAvailabilityZonesArgs.builder().state("available").build());
         ctx.export("availabilityZones", availabilityZones.applyValue(GetAvailabilityZonesResult::names));
 
         availabilityZones.applyValue(getAvailabilityZonesResult -> {
             List<String> zones = getAvailabilityZonesResult.names();
-            List<Subnet> publicSubnets=createPublicSubnets(zones,vpc,new ArrayList<>());
-            List<Subnet> privateSubnets=createPrivateSubnets(zones,vpc,new ArrayList<>());
-            RouteTable publicRouteTable = new RouteTable("publicRouteTable", RouteTableArgs.builder()
+            List<Subnet> publicSubnets=createPublicSubnets(num_of_subnets,zones,vpc,config,new ArrayList<>());
+            List<Subnet> privateSubnets=createPrivateSubnets(num_of_subnets,zones,vpc,config,new ArrayList<>());
+
+            // Create public route table and attach public subnets
+            RouteTable publicRouteTable = new RouteTable(publicRT, RouteTableArgs.builder()
                     .vpcId(vpc.id())
-                    .tags(Map.of("Name", "PublicRouteTable"))
+                    .tags(Map.of("Name", publicRT))
                     .build());
+
             for(int i=0;i<publicSubnets.size();i++){
-                new RouteTableAssociation("publicSubnetAssociation" + i, new RouteTableAssociationArgs.Builder()
+                new RouteTableAssociation(publicRtAssociation + i,RouteTableAssociationArgs.builder()
                         .subnetId(publicSubnets.get(i).id())
                         .routeTableId(publicRouteTable.id())
                         .build());
             }
 
             // Create private route table and attach private subnets
-            RouteTable privateRouteTable = new RouteTable("privateRouteTable", RouteTableArgs.builder()
+            RouteTable privateRouteTable = new RouteTable(privateRt, RouteTableArgs.builder()
                     .vpcId(vpc.id())
-                    .tags(Map.of("Name", "PrivateRouteTable"))
+                    .tags(Map.of("Name", privateRt))
                     .build());
 
             for(int i=0;i<privateSubnets.size();i++){
-                new RouteTableAssociation("privateSubnetAssociation" + i, new RouteTableAssociationArgs.Builder()
+                new RouteTableAssociation(privateRtAssociation + i, RouteTableAssociationArgs.builder()
                         .subnetId(privateSubnets.get(i).id())
                         .routeTableId(privateRouteTable.id())
                         .build());
             }
 
             // Create public route with the internet gateway as the target
-            new Route("publicRoute", new RouteArgs.Builder()
+            new Route(publicRouteAll, new RouteArgs.Builder()
                     .routeTableId(publicRouteTable.id())
-                    .destinationCidrBlock("0.0.0.0/0")
+                    .destinationCidrBlock(destinationCidrPublic)
                     .gatewayId(igw.id())
                     .build());
 
-            ctx.export("sfd",Output.of(privateSubnets.size()));
-
-
             return null;
         });
-
-
-        // Create public route table and attach public subnets
-
-//        Output.of(publicSubnetIds.size());
-
-
-
-
-
     }
 
-    private static List<Subnet> createPrivateSubnets(List<String> zones, Vpc vpc, List<Subnet> privateSubnets) {
-        int num_of_subnets=Math.min(3,zones.size());
+    private static List<Subnet> createPrivateSubnets(int num,List<String> zones, Vpc vpc, Config config, List<Subnet> privateSubnets) {
+        int num_of_subnets=Math.min(num,zones.size());
+        String privateSubnetName = config.require("privateSubnetName");
+
         for(int i=0;i<num_of_subnets;i++){
-            Subnet privateSubnet = new Subnet("privateSubnet" + i, new SubnetArgs.Builder()
+            Subnet privateSubnet = new Subnet(privateSubnetName + i, new SubnetArgs.Builder()
                     .vpcId(vpc.id())
                     .availabilityZone(zones.get(i))
-                    .cidrBlock("10.0." + (i + 3) + ".0/24")
-                    .tags(Map.of("Name", "PrivateSubnet" + i))
+                    .cidrBlock("10.0." + (i + 4) + ".0/24")
+                    .tags(Map.of("Name", privateSubnetName + i))
                     .build());
 
             privateSubnets.add(privateSubnet);
@@ -114,21 +113,21 @@ public class App {
 
     }
 
-    private static List<Subnet> createPublicSubnets(List<String> zones, Vpc vpc, List<Subnet> publicSubnets) {
-        int num_of_subnets=Math.min(3,zones.size());
+    private static List<Subnet> createPublicSubnets(int num,List<String> zones, Vpc vpc, Config config, List<Subnet> publicSubnets) {
+        int num_of_subnets=Math.min(num,zones.size());
+        String publicSubnetName = config.require("publicSubnetName");
+
         for (int i = 0; i < num_of_subnets; i++) {
             // Create public subnets
-            Subnet publicSubnet = new Subnet("publicSubnet" + i, new SubnetArgs.Builder()
+            Subnet publicSubnet = new Subnet(publicSubnetName + i, new SubnetArgs.Builder()
                     .vpcId(vpc.id())
                     .availabilityZone(zones.get(i))
-                    .cidrBlock("10.0." + i + ".0/24")
+                    .cidrBlock("10.0." + (i+1) + ".0/24")
                     .mapPublicIpOnLaunch(true)
-                    .tags(Map.of("Name", "PublicSubnet" + i))
+                    .tags(Map.of("Name", publicSubnetName + i))
                     .build());
             publicSubnets.add(publicSubnet);
         }
         return publicSubnets;
     }
-
-
 }

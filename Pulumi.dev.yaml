@@ -1,6 +1,15 @@
 config:
   aws:profile: dev
-  aws:region: us-east-1
+  aws:region: ap-south-1
   cidrBlock: 10.0.0.0/16
   vpcName: vpcMani
-  igwName: igwMani
+  internetGatewayName: igwMani
+  publicRouteTable: publicRTMani
+  privateRouteTable: privateRTMani
+  publicSubnetName: publicSubnetMani
+  privateSubnetName: privateSubnetMani
+  publicRouteTableAssociation: publicRTAssociationMani
+  privateRouteTableAssociation: privateRTAssociationMani
+  publicRoute: publicRouteAll
+  destinationCidrPublic: 0.0.0.0/0
+  num_of_subnets: 3
