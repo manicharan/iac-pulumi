@@ -1,14 +1,15 @@
 config:
-  aws:profile: dev
+  aws:profile: demo
   aws:region: us-east-1
-  iac-pulumi:cidrBlock: 10.0.0.0/16
-  iac-pulumi:destinationCidrPublic: 0.0.0.0/0
-  iac-pulumi:internetGatewayName: igwMani
-  iac-pulumi:privateRouteTable: privateRTMani
-  iac-pulumi:privateRouteTableAssociation: privateRTAssociationMani
-  iac-pulumi:privateSubnetName: privateSubnetMani
-  iac-pulumi:publicRoute: publicRouteAll
-  iac-pulumi:publicRouteTable: publicRTMani
-  iac-pulumi:publicRouteTableAssociation: publicRTAssociationMani
-  iac-pulumi:publicSubnetName: publicSubnetMani
-  iac-pulumi:vpcName: vpcMani
+  cidrBlock: 172.0.0.0/16
+  vpcName: vpcMani
+  internetGatewayName: igwMani
+  publicRouteTable: publicRTMani
+  privateRouteTable: privateRTMani
+  publicSubnetName: publicSubnetMani
+  privateSubnetName: privateSubnetMani
+  publicRouteTableAssociation: publicRTAssociationMani
+  privateRouteTableAssociation: privateRTAssociationMani
+  publicRoute: publicRouteAll
+  destinationCidrPublic: 0.0.0.0/0
+  num_of_subnets: 3
