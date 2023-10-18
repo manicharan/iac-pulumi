@@ -17,3 +17,8 @@ config:
   volume: 25
   amiId: ami-0d6ad1ea65bedb25c
   sshKeyName: packer_ami
+  securityGroupName: application security group
+  deviceName: /dev/xvda
+  instanceType: t2.micro
+  volumeType: gp2
+  ec2Name: webapp

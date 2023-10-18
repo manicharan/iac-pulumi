@@ -41,11 +41,11 @@ public class App {
         int volume = config.requireInteger("volume");
         String amiId = config.require("amiId");
         String sshKeyName = config.require("sshKeyName");
-
-//        List<Integer> allowedPorts = new ArrayList<>();
-//        for(String port:ports){
-//            allowedPorts.add(Integer.valueOf(port));
-//        }
+        String securityGroupName = config.require("securityGroupName");
+        String deviceName = config.require("deviceName");
+        String instanceType = config.require("instanceType");
+        String volumeType = config.require("volumeType");
+        String ec2Name = config.require("ec2Name");
 
         // Create a VPC
         var vpc = new Vpc(vpcName, VpcArgs.builder()
@@ -61,9 +61,9 @@ public class App {
                 .build());
 
         // Create a Security Group
-        var securityGroup = new SecurityGroup("application security group", SecurityGroupArgs.builder()
+        var securityGroup = new SecurityGroup(securityGroupName, SecurityGroupArgs.builder()
                 .vpcId(vpc.id())
-                .tags(Map.of("Name","application security group"))
+                .tags(Map.of("Name",securityGroupName))
                 .build());
 
         // Adding ingress to allow traffic on ports
@@ -124,20 +124,20 @@ public class App {
                     .build());
 
             // Create EC2 instance
-            var instance = new Instance("webapp", InstanceArgs.builder()
+            var instance = new Instance(ec2Name, InstanceArgs.builder()
                     .ami(amiId)
-                    .instanceType("t2.micro")
+                    .instanceType(instanceType)
                     .keyName(sshKeyName)
                     .ebsBlockDevices(InstanceEbsBlockDeviceArgs.builder()
                             .deleteOnTermination(true)
-                            .deviceName("/dev/xvda")
-                            .volumeType("gp2")
+                            .deviceName(deviceName)
+                            .volumeType(volumeType)
                             .volumeSize(volume)
                             .build())
                     .vpcSecurityGroupIds(securityGroup.id().applyValue(Collections::singletonList))
                     .subnetId(publicSubnets.get(0).id())
                     .disableApiTermination(false)
-                    .tags(Map.of("Name","webapp"))
+                    .tags(Map.of("Name",ec2Name))
                     .build());
 
             return null;
@@ -179,22 +179,3 @@ public class App {
         return subnets;
     }
 }
-
-
-//    private static List<Subnet> createPrivateSubnets(int num,List<String> zones, Vpc vpc, Config config, List<Subnet> privateSubnets) {
-//        int num_of_subnets=Math.min(num,zones.size());
-//        String privateSubnetName = config.require("privateSubnetName");
-//
-//        for(int i=0;i<num_of_subnets;i++){
-//            Subnet privateSubnet = new Subnet(privateSubnetName + i, new SubnetArgs.Builder()
-//                    .vpcId(vpc.id())
-//                    .availabilityZone(zones.get(i))
-//                    .cidrBlock("10.0." + (i + 4) + ".0/24")
-//                    .tags(Map.of("Name", privateSubnetName + i))
-//                    .build());
-//
-//            privateSubnets.add(privateSubnet);
-//        }
-//        return privateSubnets;
-//
-//    }

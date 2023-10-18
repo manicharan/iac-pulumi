@@ -13,3 +13,12 @@ config:
   publicRoute: publicRouteAll
   destinationCidrPublic: 0.0.0.0/0
   num_of_subnets: 3
+  ports: 22,80,443,8080
+  volume: 25
+  amiId: ami-0d6ad1ea65bedb25c
+  sshKeyName: packer_ami
+  securityGroupName: application security group
+  deviceName: /dev/xvda
+  instanceType: t2.micro
+  volumeType: gp2
+  ec2Name: webapp
