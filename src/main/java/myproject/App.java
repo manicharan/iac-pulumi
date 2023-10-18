@@ -4,10 +4,12 @@ import com.pulumi.Context;
 import com.pulumi.Pulumi;
 import com.pulumi.aws.AwsFunctions;
 import com.pulumi.aws.ec2.*;
+import com.pulumi.aws.ec2.inputs.InstanceEbsBlockDeviceArgs;
 import com.pulumi.aws.inputs.GetAvailabilityZonesArgs;
 import com.pulumi.aws.outputs.GetAvailabilityZonesResult;
 import com.pulumi.aws.outputs.GetRegionResult;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -34,7 +36,16 @@ public class App {
         String privateRtAssociation = config.require("privateRouteTableAssociation");
         String publicRouteAll = config.require("publicRoute");
         String destinationCidrPublic = config.require("destinationCidrPublic");
-        int num_of_subnets = Integer.parseInt(config.require("num_of_subnets"));
+        int num_of_subnets = config.requireInteger("num_of_subnets");
+        String[] allowedPorts =config.require("ports").split(",");
+        int volume = config.requireInteger("volume");
+        String amiId = config.require("amiId");
+        String sshKeyName = config.require("sshKeyName");
+
+//        List<Integer> allowedPorts = new ArrayList<>();
+//        for(String port:ports){
+//            allowedPorts.add(Integer.valueOf(port));
+//        }
 
         // Create a VPC
         var vpc = new Vpc(vpcName, VpcArgs.builder()
@@ -48,6 +59,27 @@ public class App {
                 .vpcId(vpc.id())
                 .tags(Map.of("Name", igwName))
                 .build());
+
+        // Create a Security Group
+        var securityGroup = new SecurityGroup("application security group", SecurityGroupArgs.builder()
+                .vpcId(vpc.id())
+                .tags(Map.of("Name","application security group"))
+                .build());
+
+        // Adding ingress to allow traffic on ports
+        for(String allowedPort: allowedPorts){
+            int port=Integer.parseInt(allowedPort);
+            var securityGroupRule = new SecurityGroupRule("allowAllOn "+port, SecurityGroupRuleArgs.builder()
+                    .type("ingress")
+                    .fromPort(port)
+                    .toPort(port)
+                    .protocol("tcp")
+                    .securityGroupId(securityGroup.id())
+                    .cidrBlocks(destinationCidrPublic)
+                    .build());
+
+        }
+
 
         var availabilityZones = AwsFunctions.getAvailabilityZones(GetAvailabilityZonesArgs.builder().state("available").build());
         ctx.export("availabilityZones", availabilityZones.applyValue(GetAvailabilityZonesResult::names));
@@ -89,6 +121,23 @@ public class App {
                     .routeTableId(publicRouteTable.id())
                     .destinationCidrBlock(destinationCidrPublic)
                     .gatewayId(igw.id())
+                    .build());
+
+            // Create EC2 instance
+            var instance = new Instance("webapp", InstanceArgs.builder()
+                    .ami(amiId)
+                    .instanceType("t2.micro")
+                    .keyName(sshKeyName)
+                    .ebsBlockDevices(InstanceEbsBlockDeviceArgs.builder()
+                            .deleteOnTermination(true)
+                            .deviceName("/dev/xvda")
+                            .volumeType("gp2")
+                            .volumeSize(volume)
+                            .build())
+                    .vpcSecurityGroupIds(securityGroup.id().applyValue(Collections::singletonList))
+                    .subnetId(publicSubnets.get(0).id())
+                    .disableApiTermination(false)
+                    .tags(Map.of("Name","webapp"))
                     .build());
 
             return null;
