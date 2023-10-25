@@ -36,58 +36,85 @@ public class App {
 
         //Getting the configuration values
         String vpcName = config.require("vpcName");
-        String cidr = config.require("cidrBlock");
+        String inputCidr = config.require("cidrBlock");
         String igwName = config.require("internetGatewayName");
         String publicRT = config.require("publicRouteTable");
-        String privateRt = config.require("privateRouteTable");
+        String privateRT = config.require("privateRouteTable");
         String publicRtAssociation = config.require("publicRouteTableAssociation");
         String privateRtAssociation = config.require("privateRouteTableAssociation");
-        String publicRouteAll = config.require("publicRoute");
+        String publicRouteAllowAll = config.require("publicRoute");
         String destinationCidrPublic = config.require("destinationCidrPublic");
         int num_of_subnets = config.requireInteger("num_of_subnets");
-        String[] allowedPorts =config.require("ports").split(",");
-        int volume = config.requireInteger("volume");
+        String[] allowedPortsForEC2 =config.require("ports").split(",");
+        int ec2Volume = config.requireInteger("volume");
         String amiId = config.require("amiId");
         String sshKeyName = config.require("sshKeyName");
-        String securityGroupName = config.require("securityGroupName");
-        String deviceName = config.require("deviceName");
-        String instanceType = config.require("instanceType");
-        String volumeType = config.require("volumeType");
+        String ec2SecurityGroupName = config.require("securityGroupName");
+        String ec2DeviceName = config.require("deviceName");
+        String ec2InstanceType = config.require("instanceType");
+        String ec2VolumeType = config.require("volumeType");
         String ec2Name = config.require("ec2Name");
         String rdsSecurityGroupName = config.require("rdsSecurityGroupName");
         int databasePort = config.requireInteger("databasePort");
+        String rdsInstanceIdentifier = config.require("instanceIdentifier");
+        String rdsUsername = config.require("rdsUsername");
+        String rdsPassword = config.require("rdsPassword");
+        String rdsDBName = config.require("rdsDBName");
+        int rdsAllocatedStorage = config.requireInteger("rdsAllocatedStorage");
+        String rdsInstanceClass = config.require("rdsInstanceClass");
+        String rdsDBFamily = config.require("rdsDBFamily");
+        String rdsEngine = config.require("rdsEngine");
+        String rdsEngineVersion = config.require("rdsEngineVersion");
 
         // Create a VPC
         var vpc = new Vpc(vpcName, VpcArgs.builder()
-                .cidrBlock(cidr)
+                .cidrBlock(inputCidr)
                 .instanceTenancy("default")
                 .tags(Map.of("Name", vpcName))
                 .build());
 
-        // Create an Internet Gateway and attach it to the VPC
+        // Create an Internet Gateway and attach VPC to it
         var igw = new InternetGateway(igwName, new InternetGatewayArgs.Builder()
                 .vpcId(vpc.id())
                 .tags(Map.of("Name", igwName))
                 .build());
 
-        // Create a Security Group
-        var securityGroup = new SecurityGroup(securityGroupName, SecurityGroupArgs.builder()
+        // Create public route table
+        RouteTable publicRouteTable = new RouteTable(publicRT, RouteTableArgs.builder()
                 .vpcId(vpc.id())
-                .tags(Map.of("Name",securityGroupName))
+                .tags(Map.of("Name", publicRT))
+                .build());
+
+        // Create public route with the internet gateway as the target
+        new Route(publicRouteAllowAll, new RouteArgs.Builder()
+                .routeTableId(publicRouteTable.id())
+                .destinationCidrBlock(destinationCidrPublic)
+                .gatewayId(igw.id())
+                .build());
+
+        // Create private route table
+        RouteTable privateRouteTable = new RouteTable(privateRT, RouteTableArgs.builder()
+                .vpcId(vpc.id())
+                .tags(Map.of("Name", privateRT))
+                .build());
+
+        // Create a Security Group for EC2
+        var securityGroupForEC2 = new SecurityGroup(ec2SecurityGroupName, SecurityGroupArgs.builder()
+                .vpcId(vpc.id())
+                .tags(Map.of("Name",ec2SecurityGroupName))
                 .build());
 
         // Adding ingress to allow traffic on ports
-        for(String allowedPort: allowedPorts){
+        for(String allowedPort: allowedPortsForEC2){
             int port=Integer.parseInt(allowedPort);
             var securityGroupRule = new SecurityGroupRule("allowAllOn "+port, SecurityGroupRuleArgs.builder()
                     .type("ingress")
                     .fromPort(port)
                     .toPort(port)
                     .protocol("tcp")
-                    .securityGroupId(securityGroup.id())
+                    .securityGroupId(securityGroupForEC2.id())
                     .cidrBlocks(destinationCidrPublic)
                     .build());
-
         }
 
         // Create a Security Group for RDS Instances
@@ -96,54 +123,43 @@ public class App {
                 .tags(Map.of("Name",rdsSecurityGroupName))
                 .build());
 
+        // RDS Security Group rule to allow Inbound traffic from EC2 security group
         var rdsSecurityGroupRule = new SecurityGroupRule("allow EC2 on "+databasePort, SecurityGroupRuleArgs.builder()
                 .type("ingress")
-                .fromPort(3306)
-                .toPort(3306)
+                .fromPort(databasePort)
+                .toPort(databasePort)
                 .protocol("tcp")
-                .sourceSecurityGroupId(securityGroup.id())
+                .sourceSecurityGroupId(securityGroupForEC2.id())
                 .securityGroupId(rdsSecurityGroup.id())
                 .build());
 
+        // Outbound rule to allow outbound traffic for EC2
         var outboundRule = new SecurityGroupRule("Outbound Rule", SecurityGroupRuleArgs.builder()
                 .type("egress")
-                .fromPort(0)
-                .toPort(0)
-                .protocol("-1")
-                .securityGroupId(securityGroup.id())
+                .fromPort(databasePort)
+                .toPort(databasePort)
+                .protocol("tcp")
+                .securityGroupId(securityGroupForEC2.id())
                 .cidrBlocks(destinationCidrPublic)
                 .build());
 
-        ParameterGroup dbParameterGroup = new ParameterGroup("rds-parameter-group", ParameterGroupArgs.builder()
-                .family("mariadb10.6")
-                .description("Custom parameter group for Mariadb")
-                .tags(Collections.singletonMap("Name", "MyDBParameterGroup"))
+        // Create DB Parameter group
+        ParameterGroup rdsDBParameterGroup = new ParameterGroup("rdsgroup", ParameterGroupArgs.builder()
+                .family(rdsDBFamily)
+                .tags(Map.of("Name","rdsgroup"))
                 .build());
 
-        String rdsInstanceIdentifier = "webdb";
-        String rdsMasterUsername = "admin";
-        String rdsMasterPassword = "password";
-        String dbName = "webdb";
-        String storageType = "gp2";
-        int allocatedStorage = 20;
-        String instanceClass = "db.t3.micro";
-
-
+        // Get availability zones
         var availabilityZones = AwsFunctions.getAvailabilityZones(GetAvailabilityZonesArgs.builder().state("available").build());
         ctx.export("availabilityZones", availabilityZones.applyValue(GetAvailabilityZonesResult::names));
 
         availabilityZones.applyValue(getAvailabilityZonesResult -> {
             List<String> zones = getAvailabilityZonesResult.names();
-            List<String> subnetCidrBlocks = calculateCidrBlocks(cidr, (int) Math.pow(2,zones.size()));
+            List<String> subnetCidrBlocks = calculateCidrBlocks(inputCidr, (int) Math.pow(2,zones.size()));
             List<Subnet> publicSubnets=createSubnets(num_of_subnets,zones,vpc,subnetCidrBlocks,true,0);
             List<Subnet> privateSubnets=createSubnets(num_of_subnets,zones,vpc,subnetCidrBlocks,false,zones.size()-1);
 
-            // Create public route table and attach public subnets
-            RouteTable publicRouteTable = new RouteTable(publicRT, RouteTableArgs.builder()
-                    .vpcId(vpc.id())
-                    .tags(Map.of("Name", publicRT))
-                    .build());
-
+            // Attaching public subnets to public route table
             for(int i=0;i<publicSubnets.size();i++){
                 new RouteTableAssociation(publicRtAssociation + i,RouteTableAssociationArgs.builder()
                         .subnetId(publicSubnets.get(i).id())
@@ -151,12 +167,7 @@ public class App {
                         .build());
             }
 
-            // Create private route table and attach private subnets
-            RouteTable privateRouteTable = new RouteTable(privateRt, RouteTableArgs.builder()
-                    .vpcId(vpc.id())
-                    .tags(Map.of("Name", privateRt))
-                    .build());
-
+            // Attaching private subnets to private route table
             for(int i=0;i<privateSubnets.size();i++){
                 new RouteTableAssociation(privateRtAssociation + i, RouteTableAssociationArgs.builder()
                         .subnetId(privateSubnets.get(i).id())
@@ -164,39 +175,33 @@ public class App {
                         .build());
             }
 
-            // Create public route with the internet gateway as the target
-            new Route(publicRouteAll, new RouteArgs.Builder()
-                    .routeTableId(publicRouteTable.id())
-                    .destinationCidrBlock(destinationCidrPublic)
-                    .gatewayId(igw.id())
+            // Create a subnet group for your RDS instance
+            SubnetGroup dbSubnetGroup = new SubnetGroup("subnetgroup", SubnetGroupArgs.builder()
+                    .subnetIds(Output.all(privateSubnets.stream().map(Subnet::id).collect(toList())))
+                    .name("subnetgroup")
                     .build());
 
-            // Create a subnet group for your RDS instance
-            SubnetGroup dbSubnetGroup = new SubnetGroup("my-db-subnet-group1", SubnetGroupArgs.builder()
-                    .subnetIds(Output.all(privateSubnets.stream().map(Subnet::id).collect(toList())))
-                    .description("My RDS Subnet Group")
-                    .name("my-db-subnet-group1")
-                    .build());
             // Create the RDS instance
             com.pulumi.aws.rds.Instance rdsInstance = new com.pulumi.aws.rds.Instance("myRDSInstance", com.pulumi.aws.rds.InstanceArgs.builder()
-                    .instanceClass(instanceClass)
-                    .allocatedStorage(allocatedStorage)
-                    .engine("mariadb")
-                    .engineVersion("10.6.14")
+                    .instanceClass(rdsInstanceClass)
+                    .allocatedStorage(rdsAllocatedStorage)
+                    .engine(rdsEngine)
+                    .engineVersion(rdsEngineVersion)
                     .identifier(rdsInstanceIdentifier)
-                    .username(rdsMasterUsername)
-                    .password(rdsMasterPassword)
+                    .username(rdsUsername)
+                    .password(rdsPassword)
                     .skipFinalSnapshot(true)
                     .publiclyAccessible(false)
                     .multiAz(false)
-                    .parameterGroupName(dbParameterGroup.name())
-                    .dbName(dbName)
+                    .parameterGroupName(rdsDBParameterGroup.name())
+                    .dbName(rdsDBName)
                     .port(databasePort)
                     .vpcSecurityGroupIds(rdsSecurityGroup.id().applyValue(Collections::singletonList))
                     .dbSubnetGroupName(dbSubnetGroup.name())
-                    .tags(Collections.singletonMap("Name", "MyRDSInstance"))
+                    .tags(Map.of("Name","myRDSInstance"))
                     .build());
 
+            // User Data Script
             Output<String> userDataScript =rdsInstance.address().applyValue(v -> String.format(
                     "#!/bin/bash\n" +
                             "echo 'export DB_User=%s' >> /etc/environment\n" +
@@ -205,42 +210,25 @@ public class App {
                             "echo 'export DB_Port=%s' >> /etc/environment\n"+
                             "echo 'export DB_Database=%s' >> /etc/environment\n",
 
-                            rdsMasterUsername, rdsMasterPassword,v,databasePort,dbName
+                            rdsUsername, rdsPassword,v,databasePort,rdsDBName
             ));
 
             // Create EC2 instance
             var instance = new Instance(ec2Name, InstanceArgs.builder()
                     .ami(amiId)
-                    .instanceType(instanceType)
+                    .instanceType(ec2InstanceType)
                     .keyName(sshKeyName)
                     .ebsBlockDevices(InstanceEbsBlockDeviceArgs.builder()
                             .deleteOnTermination(true)
-                            .deviceName(deviceName)
-                            .volumeType(volumeType)
-                            .volumeSize(volume)
+                            .deviceName(ec2DeviceName)
+                            .volumeType(ec2VolumeType)
+                            .volumeSize(ec2Volume)
                             .build())
-                    .vpcSecurityGroupIds(securityGroup.id().applyValue(Collections::singletonList))
+                    .vpcSecurityGroupIds(securityGroupForEC2.id().applyValue(Collections::singletonList))
                     .subnetId(publicSubnets.get(0).id())
                     .disableApiTermination(false)
                     .userData(userDataScript)
                     .tags(Map.of("Name",ec2Name))
-                    .build());
-
-            var instance1 = new Instance("webapp2", InstanceArgs.builder()
-                    .ami(amiId)
-                    .instanceType(instanceType)
-                    .keyName(sshKeyName)
-                    .ebsBlockDevices(InstanceEbsBlockDeviceArgs.builder()
-                            .deleteOnTermination(true)
-                            .deviceName(deviceName)
-                            .volumeType(volumeType)
-                            .volumeSize(volume)
-                            .build())
-                    .vpcSecurityGroupIds(securityGroup.id().applyValue(Collections::singletonList))
-                    .subnetId(publicSubnets.get(0).id())
-                    .disableApiTermination(false)
-                    .userData(userDataScript)
-                    .tags(Map.of("Name","webapp2"))
                     .build());
 
             return null;
@@ -260,8 +248,6 @@ public class App {
 
         return subnetCidrBlocks;
     }
-
-
 
     private static List<Subnet> createSubnets(int num,List<String> zones, Vpc vpc, List<String> subnetCidrBlocks, Boolean isPublic, int n) {
         int num_of_subnets=Math.min(num,zones.size());

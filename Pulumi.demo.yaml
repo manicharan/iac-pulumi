@@ -24,3 +24,12 @@ config:
   ec2Name: webapp
   rdsSecurityGroupName: Database security group
   databasePort: 3306
+  instanceIdentifier: csye6225
+  rdsUsername: csye6225
+  rdsPassword: password
+  rdsDBName: csye6225
+  rdsAllocatedStorage: 20
+  rdsInstanceClass: db.t3.micro
+  rdsDBFamily: mariadb10.6
+  rdsEngine: mariadb
+  rdsEngineVersion: 10.6.14
