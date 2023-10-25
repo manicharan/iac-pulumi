@@ -22,3 +22,5 @@ config:
   instanceType: t2.micro
   volumeType: gp2
   ec2Name: webapp
+  rdsSecurityGroupName: Database security group
+  databasePort: 3306
