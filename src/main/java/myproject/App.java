@@ -204,11 +204,11 @@ public class App {
             // User Data Script
             Output<String> userDataScript =rdsInstance.address().applyValue(v -> String.format(
                     "#!/bin/bash\n" +
-                            "echo 'export DB_User=%s' >> /etc/environment\n" +
-                            "echo 'export DB_Password=%s' >> /etc/environment\n" +
-                            "echo 'export DB_Host=%s' >> /etc/environment\n" +
-                            "echo 'export DB_Port=%s' >> /etc/environment\n"+
-                            "echo 'export DB_Database=%s' >> /etc/environment\n",
+                            "echo 'export DB_User=%s' >> /opt/csye6225/application.properties\n" +
+                            "echo 'export DB_Password=%s' >> /opt/csye6225/application.properties\n" +
+                            "echo 'export DB_Host=%s' >> /opt/csye6225/application.properties\n" +
+                            "echo 'export DB_Port=%s' >> /opt/csye6225/application.properties\n"+
+                            "echo 'export DB_Database=%s' >> /opt/csye6225/application.properties\n",
 
                             rdsUsername, rdsPassword,v,databasePort,rdsDBName
             ));

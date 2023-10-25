@@ -15,7 +15,7 @@ config:
   num_of_subnets: 3
   ports: 22,80,443,8080
   volume: 25
-  amiId: ami-01146a714512f1614
+  amiId: ami-07829d63eceb788c3
   sshKeyName: packer_dev
   securityGroupName: application security group
   deviceName: /dev/xvda
