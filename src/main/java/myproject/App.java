@@ -5,6 +5,11 @@ import com.pulumi.Pulumi;
 import com.pulumi.aws.AwsFunctions;
 import com.pulumi.aws.ec2.*;
 import com.pulumi.aws.ec2.inputs.InstanceEbsBlockDeviceArgs;
+import com.pulumi.aws.iam.*;
+import com.pulumi.aws.iam.inputs.GetPolicyDocumentArgs;
+import com.pulumi.aws.iam.inputs.GetPolicyDocumentStatementArgs;
+import com.pulumi.aws.iam.inputs.GetPolicyDocumentStatementPrincipalArgs;
+import com.pulumi.aws.iam.outputs.GetPolicyDocumentResult;
 import com.pulumi.aws.inputs.GetAvailabilityZonesArgs;
 import com.pulumi.aws.outputs.GetAvailabilityZonesResult;
 import com.pulumi.aws.outputs.GetRegionResult;
@@ -12,6 +17,8 @@ import com.pulumi.aws.rds.ParameterGroup;
 import com.pulumi.aws.rds.ParameterGroupArgs;
 import com.pulumi.aws.rds.SubnetGroup;
 import com.pulumi.aws.rds.SubnetGroupArgs;
+import com.pulumi.aws.route53.Record;
+import com.pulumi.aws.route53.RecordArgs;
 import com.pulumi.core.Output;
 
 import java.util.ArrayList;
@@ -45,7 +52,7 @@ public class App {
         String publicRouteAllowAll = config.require("publicRoute");
         String destinationCidrPublic = config.require("destinationCidrPublic");
         int num_of_subnets = config.requireInteger("num_of_subnets");
-        String[] allowedPortsForEC2 =config.require("ports").split(",");
+        String[] allowedPortsForEC2 = config.require("ports").split(",");
         int ec2Volume = config.requireInteger("volume");
         String amiId = config.require("amiId");
         String sshKeyName = config.require("sshKeyName");
@@ -101,14 +108,23 @@ public class App {
         // Create a Security Group for EC2
         var securityGroupForEC2 = new SecurityGroup(ec2SecurityGroupName, SecurityGroupArgs.builder()
                 .vpcId(vpc.id())
-                .tags(Map.of("Name",ec2SecurityGroupName))
+                .tags(Map.of("Name", ec2SecurityGroupName))
                 .build());
 
         // Adding ingress to allow traffic on ports
-        for(String allowedPort: allowedPortsForEC2){
-            int port=Integer.parseInt(allowedPort);
-            var securityGroupRule = new SecurityGroupRule("allowAllOn "+port, SecurityGroupRuleArgs.builder()
+        for (String allowedPort : allowedPortsForEC2) {
+            int port = Integer.parseInt(allowedPort);
+            var securityGroupRule = new SecurityGroupRule("allowAllOn " + port, SecurityGroupRuleArgs.builder()
                     .type("ingress")
+                    .fromPort(port)
+                    .toPort(port)
+                    .protocol("tcp")
+                    .securityGroupId(securityGroupForEC2.id())
+                    .cidrBlocks(destinationCidrPublic)
+                    .build());
+            //check this once!
+            var outboundRule = new SecurityGroupRule("Outbound Rule On " + port, SecurityGroupRuleArgs.builder()
+                    .type("egress")
                     .fromPort(port)
                     .toPort(port)
                     .protocol("tcp")
@@ -120,11 +136,11 @@ public class App {
         // Create a Security Group for RDS Instances
         var rdsSecurityGroup = new SecurityGroup(rdsSecurityGroupName, SecurityGroupArgs.builder()
                 .vpcId(vpc.id())
-                .tags(Map.of("Name",rdsSecurityGroupName))
+                .tags(Map.of("Name", rdsSecurityGroupName))
                 .build());
 
         // RDS Security Group rule to allow Inbound traffic from EC2 security group
-        var rdsSecurityGroupRule = new SecurityGroupRule("allow EC2 on "+databasePort, SecurityGroupRuleArgs.builder()
+        var rdsSecurityGroupRule = new SecurityGroupRule("allow EC2 on " + databasePort, SecurityGroupRuleArgs.builder()
                 .type("ingress")
                 .fromPort(databasePort)
                 .toPort(databasePort)
@@ -146,7 +162,7 @@ public class App {
         // Create DB Parameter group
         ParameterGroup rdsDBParameterGroup = new ParameterGroup("rdsgroup", ParameterGroupArgs.builder()
                 .family(rdsDBFamily)
-                .tags(Map.of("Name","rdsgroup"))
+                .tags(Map.of("Name", "rdsgroup"))
                 .build());
 
         // Get availability zones
@@ -155,20 +171,20 @@ public class App {
 
         availabilityZones.applyValue(getAvailabilityZonesResult -> {
             List<String> zones = getAvailabilityZonesResult.names();
-            List<String> subnetCidrBlocks = calculateCidrBlocks(inputCidr, (int) Math.pow(2,zones.size()));
-            List<Subnet> publicSubnets=createSubnets(num_of_subnets,zones,vpc,subnetCidrBlocks,true,0);
-            List<Subnet> privateSubnets=createSubnets(num_of_subnets,zones,vpc,subnetCidrBlocks,false,zones.size()-1);
+            List<String> subnetCidrBlocks = calculateCidrBlocks(inputCidr, (int) Math.pow(2, zones.size()));
+            List<Subnet> publicSubnets = createSubnets(num_of_subnets, zones, vpc, subnetCidrBlocks, true, 0);
+            List<Subnet> privateSubnets = createSubnets(num_of_subnets, zones, vpc, subnetCidrBlocks, false, zones.size() - 1);
 
             // Attaching public subnets to public route table
-            for(int i=0;i<publicSubnets.size();i++){
-                new RouteTableAssociation(publicRtAssociation + i,RouteTableAssociationArgs.builder()
+            for (int i = 0; i < publicSubnets.size(); i++) {
+                new RouteTableAssociation(publicRtAssociation + i, RouteTableAssociationArgs.builder()
                         .subnetId(publicSubnets.get(i).id())
                         .routeTableId(publicRouteTable.id())
                         .build());
             }
 
             // Attaching private subnets to private route table
-            for(int i=0;i<privateSubnets.size();i++){
+            for (int i = 0; i < privateSubnets.size(); i++) {
                 new RouteTableAssociation(privateRtAssociation + i, RouteTableAssociationArgs.builder()
                         .subnetId(privateSubnets.get(i).id())
                         .routeTableId(privateRouteTable.id())
@@ -198,20 +214,37 @@ public class App {
                     .port(databasePort)
                     .vpcSecurityGroupIds(rdsSecurityGroup.id().applyValue(Collections::singletonList))
                     .dbSubnetGroupName(dbSubnetGroup.name())
-                    .tags(Map.of("Name","myRDSInstance"))
+                    .tags(Map.of("Name", "myRDSInstance"))
                     .build());
 
             // User Data Script
-            Output<String> userDataScript =rdsInstance.address().applyValue(v -> String.format(
+            Output<String> userDataScript = rdsInstance.address().applyValue(v -> String.format(
                     "#!/bin/bash\n" +
+                            "sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/cloudwatch-config.json -s\n" +
                             "echo 'export DB_User=%s' >> /opt/csye6225/application.properties\n" +
                             "echo 'export DB_Password=%s' >> /opt/csye6225/application.properties\n" +
                             "echo 'export DB_Host=%s' >> /opt/csye6225/application.properties\n" +
-                            "echo 'export DB_Port=%s' >> /opt/csye6225/application.properties\n"+
+                            "echo 'export DB_Port=%s' >> /opt/csye6225/application.properties\n" +
                             "echo 'export DB_Database=%s' >> /opt/csye6225/application.properties\n",
-
-                            rdsUsername, rdsPassword,v,databasePort,rdsDBName
+                    rdsUsername, rdsPassword, v, databasePort, rdsDBName
             ));
+            final var instanceAssumeRolePolicy = IamFunctions.getPolicyDocument(GetPolicyDocumentArgs.builder()
+                    .statements(GetPolicyDocumentStatementArgs.builder()
+                            .effect("Allow")
+                            .principals(GetPolicyDocumentStatementPrincipalArgs.builder()
+                                    .type("Service")
+                                    .identifiers("ec2.amazonaws.com")
+                                    .build())
+                            .actions("sts:AssumeRole")
+                            .build())
+                    .build());
+            var role = new Role("CW_Role", RoleArgs.builder()
+                    .assumeRolePolicy(instanceAssumeRolePolicy.applyValue(GetPolicyDocumentResult::json))
+                    .managedPolicyArns("arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy")
+                    .build());
+            var instanceProfile = new InstanceProfile("instanceProfile", InstanceProfileArgs.builder()
+                    .role(role.id())
+                    .build());
 
             // Create EC2 instance
             var instance = new Instance(ec2Name, InstanceArgs.builder()
@@ -228,8 +261,29 @@ public class App {
                     .subnetId(publicSubnets.get(0).id())
                     .disableApiTermination(false)
                     .userData(userDataScript)
-                    .tags(Map.of("Name",ec2Name))
+                    .iamInstanceProfile(instanceProfile.id())
+                    .tags(Map.of("Name", ec2Name))
                     .build());
+
+            var eip = new Eip("eip", EipArgs.builder()
+                    .domain("vpc")
+                    .build());
+//            publicSubnets.get(0)
+            var eipAssociation = new EipAssociation("eipass", EipAssociationArgs.builder()
+                    .instanceId(instance.id())
+                    .allocationId(eip.id())
+                    .build());
+//            var role = new Role("CW_Role", RoleArgs.builder()
+//                    .managedPolicyArns("arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy")
+//                    .build());
+            var record = new Record("www", RecordArgs.builder()
+                    .zoneId("Z001360514RR5YJ2TC7N5")
+                    .name("dev.manicharanreddy.com")
+                    .type("A")
+                    .ttl(60)
+                    .records(eip.publicIp().applyValue((Collections::singletonList)))
+                    .build());
+//            var role = new Role()
 
             return null;
         });
@@ -242,15 +296,15 @@ public class App {
         String[] part = parts[0].split("\\.");
 
         for (int i = 0; i < num; i++) {
-            String subnetIp = String.format("%s.%s.%d.%s", part[0], part[1],(i * (256/num)),part[3]);
+            String subnetIp = String.format("%s.%s.%d.%s", part[0], part[1], (i * (256 / num)), part[3]);
             subnetCidrBlocks.add(subnetIp + '/' + subnetPrefix);
         }
 
         return subnetCidrBlocks;
     }
 
-    private static List<Subnet> createSubnets(int num,List<String> zones, Vpc vpc, List<String> subnetCidrBlocks, Boolean isPublic, int n) {
-        int num_of_subnets=Math.min(num,zones.size());
+    private static List<Subnet> createSubnets(int num, List<String> zones, Vpc vpc, List<String> subnetCidrBlocks, Boolean isPublic, int n) {
+        int num_of_subnets = Math.min(num, zones.size());
         String subnetName = isPublic ? "Public" : "Private";
         List<Subnet> subnets = new ArrayList<>();
 
@@ -259,7 +313,7 @@ public class App {
             Subnet subnet = new Subnet(subnetName + i, new SubnetArgs.Builder()
                     .vpcId(vpc.id())
                     .availabilityZone(zones.get(i))
-                    .cidrBlock(subnetCidrBlocks.get(i+n))
+                    .cidrBlock(subnetCidrBlocks.get(i + n))
                     .mapPublicIpOnLaunch(isPublic)
                     .tags(Map.of("Name", subnetName + i))
                     .build());
