@@ -72,6 +72,11 @@ public class App {
         String rdsDBFamily = config.require("rdsDBFamily");
         String rdsEngine = config.require("rdsEngine");
         String rdsEngineVersion = config.require("rdsEngineVersion");
+        String instanceAssumeRoleIdentifier = config.require("instanceAssumeRoleIdentifier");
+        String CWRoleName = config.require("CWRoleName");
+        String ServerAgentPolicyARN = config.require("ServerAgentPolicyARN");
+        String domainZoneId = config.require("domainZoneId");
+        String domainName = config.require("domainName");
 
         // Create a VPC
         var vpc = new Vpc(vpcName, VpcArgs.builder()
@@ -111,10 +116,10 @@ public class App {
                 .tags(Map.of("Name", ec2SecurityGroupName))
                 .build());
 
-        // Adding ingress to allow traffic on ports
+        // Adding ingress and egress to allow traffic on ports
         for (String allowedPort : allowedPortsForEC2) {
             int port = Integer.parseInt(allowedPort);
-            var securityGroupRule = new SecurityGroupRule("allowAllOn " + port, SecurityGroupRuleArgs.builder()
+            var securityGroupRule = new SecurityGroupRule("InboundRuleOn " + port, SecurityGroupRuleArgs.builder()
                     .type("ingress")
                     .fromPort(port)
                     .toPort(port)
@@ -122,8 +127,7 @@ public class App {
                     .securityGroupId(securityGroupForEC2.id())
                     .cidrBlocks(destinationCidrPublic)
                     .build());
-            //check this once!
-            var outboundRule = new SecurityGroupRule("Outbound Rule On " + port, SecurityGroupRuleArgs.builder()
+            var outboundRule = new SecurityGroupRule("OutboundRuleOn " + port, SecurityGroupRuleArgs.builder()
                     .type("egress")
                     .fromPort(port)
                     .toPort(port)
@@ -228,20 +232,26 @@ public class App {
                             "echo 'export DB_Database=%s' >> /opt/csye6225/application.properties\n",
                     rdsUsername, rdsPassword, v, databasePort, rdsDBName
             ));
+
+            //creating an assumeRolePolicy for EC2 instance
             final var instanceAssumeRolePolicy = IamFunctions.getPolicyDocument(GetPolicyDocumentArgs.builder()
                     .statements(GetPolicyDocumentStatementArgs.builder()
                             .effect("Allow")
                             .principals(GetPolicyDocumentStatementPrincipalArgs.builder()
                                     .type("Service")
-                                    .identifiers("ec2.amazonaws.com")
+                                    .identifiers(instanceAssumeRoleIdentifier)
                                     .build())
                             .actions("sts:AssumeRole")
                             .build())
                     .build());
-            var role = new Role("CW_Role", RoleArgs.builder()
+
+            //creating a role
+            var role = new Role(CWRoleName, RoleArgs.builder()
                     .assumeRolePolicy(instanceAssumeRolePolicy.applyValue(GetPolicyDocumentResult::json))
-                    .managedPolicyArns("arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy")
+                    .managedPolicyArns(ServerAgentPolicyARN)
                     .build());
+
+            //creating instance profile for role
             var instanceProfile = new InstanceProfile("instanceProfile", InstanceProfileArgs.builder()
                     .role(role.id())
                     .build());
@@ -265,25 +275,23 @@ public class App {
                     .tags(Map.of("Name", ec2Name))
                     .build());
 
+            //eip association
             var eip = new Eip("eip", EipArgs.builder()
                     .domain("vpc")
                     .build());
-//            publicSubnets.get(0)
             var eipAssociation = new EipAssociation("eipass", EipAssociationArgs.builder()
                     .instanceId(instance.id())
                     .allocationId(eip.id())
                     .build());
-//            var role = new Role("CW_Role", RoleArgs.builder()
-//                    .managedPolicyArns("arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy")
-//                    .build());
+
+            //creating A Record
             var record = new Record("www", RecordArgs.builder()
-                    .zoneId("Z001360514RR5YJ2TC7N5")
-                    .name("dev.manicharanreddy.com")
+                    .zoneId(domainZoneId)
+                    .name(domainName)
                     .type("A")
                     .ttl(60)
                     .records(eip.publicIp().applyValue((Collections::singletonList)))
                     .build());
-//            var role = new Role()
 
             return null;
         });

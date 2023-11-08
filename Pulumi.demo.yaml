@@ -33,3 +33,9 @@ config:
   rdsDBFamily: mariadb10.6
   rdsEngine: mariadb
   rdsEngineVersion: 10.6.14
+  instanceAssumeRoleIdentifier: ec2.amazonaws.com
+  CWRoleName: CW_Role
+  ServerAgentPolicyARN: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+  domainZoneId: Z084093412ZXVEXEGYTX6
+  domainName: demo.manicharanreddy.com
+
