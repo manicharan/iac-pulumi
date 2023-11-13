@@ -3,14 +3,18 @@ package myproject;
 import com.pulumi.Context;
 import com.pulumi.Pulumi;
 import com.pulumi.aws.AwsFunctions;
+import com.pulumi.aws.autoscaling.Group;
+import com.pulumi.aws.autoscaling.GroupArgs;
 import com.pulumi.aws.ec2.*;
-import com.pulumi.aws.ec2.inputs.InstanceEbsBlockDeviceArgs;
+import com.pulumi.aws.ec2.inputs.*;
 import com.pulumi.aws.iam.*;
 import com.pulumi.aws.iam.inputs.GetPolicyDocumentArgs;
 import com.pulumi.aws.iam.inputs.GetPolicyDocumentStatementArgs;
 import com.pulumi.aws.iam.inputs.GetPolicyDocumentStatementPrincipalArgs;
 import com.pulumi.aws.iam.outputs.GetPolicyDocumentResult;
 import com.pulumi.aws.inputs.GetAvailabilityZonesArgs;
+import com.pulumi.aws.lb.LoadBalancer;
+import com.pulumi.aws.lb.LoadBalancerArgs;
 import com.pulumi.aws.outputs.GetAvailabilityZonesResult;
 import com.pulumi.aws.outputs.GetRegionResult;
 import com.pulumi.aws.rds.ParameterGroup;
@@ -21,10 +25,7 @@ import com.pulumi.aws.route53.Record;
 import com.pulumi.aws.route53.RecordArgs;
 import com.pulumi.core.Output;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static java.util.stream.Collectors.toList;
 
@@ -52,11 +53,11 @@ public class App {
         String publicRouteAllowAll = config.require("publicRoute");
         String destinationCidrPublic = config.require("destinationCidrPublic");
         int num_of_subnets = config.requireInteger("num_of_subnets");
-        String[] allowedPortsForEC2 = config.require("ports").split(",");
+        String[] allowedPortsForEC2 = config.require("allowedPortsForEC2").split(",");
         int ec2Volume = config.requireInteger("volume");
         String amiId = config.require("amiId");
         String sshKeyName = config.require("sshKeyName");
-        String ec2SecurityGroupName = config.require("securityGroupName");
+        String ec2SecurityGroupName = config.require("ec2SecurityGroupName");
         String ec2DeviceName = config.require("deviceName");
         String ec2InstanceType = config.require("instanceType");
         String ec2VolumeType = config.require("volumeType");
@@ -77,6 +78,9 @@ public class App {
         String ServerAgentPolicyARN = config.require("ServerAgentPolicyARN");
         String domainZoneId = config.require("domainZoneId");
         String domainName = config.require("domainName");
+        String lbSecurityGroupName = config.require("lbSecurityGroupName");
+        String[] allowedPortsForLB = config.require("allowedPortsForLB").split(",");
+        String[] outboundPortsForEC2 = config.require("outboundPortsForEC2").split(",");
 
         // Create a VPC
         var vpc = new Vpc(vpcName, VpcArgs.builder()
@@ -110,32 +114,61 @@ public class App {
                 .tags(Map.of("Name", privateRT))
                 .build());
 
+        // Create a security Group for Load Balancer
+        var securityGroupForLB = new SecurityGroup(lbSecurityGroupName, SecurityGroupArgs.builder()
+                .vpcId(vpc.id())
+                .tags(Map.of("Name", lbSecurityGroupName))
+                .build());
+
         // Create a Security Group for EC2
         var securityGroupForEC2 = new SecurityGroup(ec2SecurityGroupName, SecurityGroupArgs.builder()
                 .vpcId(vpc.id())
                 .tags(Map.of("Name", ec2SecurityGroupName))
                 .build());
 
-        // Adding ingress and egress to allow traffic on ports
-        for (String allowedPort : allowedPortsForEC2) {
+        // Adding ingress and egress to allow traffic for Application Security Group
+        for (String allowedPort : allowedPortsForLB) {
             int port = Integer.parseInt(allowedPort);
-            var securityGroupRule = new SecurityGroupRule("InboundRuleOn " + port, SecurityGroupRuleArgs.builder()
+            var securityGroupRule = new SecurityGroupRule("InboundRuleForLBOn " + port, SecurityGroupRuleArgs.builder()
                     .type("ingress")
                     .fromPort(port)
                     .toPort(port)
                     .protocol("tcp")
-                    .securityGroupId(securityGroupForEC2.id())
+                    .securityGroupId(securityGroupForLB.id())
                     .cidrBlocks(destinationCidrPublic)
                     .build());
-            var outboundRule = new SecurityGroupRule("OutboundRuleOn " + port, SecurityGroupRuleArgs.builder()
-                    .type("egress")
+//            var outboundRule = new SecurityGroupRule("OutboundRuleForLBOn " + port, SecurityGroupRuleArgs.builder()
+//                    .type("egress")
+//                    .fromPort(port)
+//                    .toPort(port)
+//                    .protocol("tcp")
+//                    .securityGroupId(securityGroupForLB.id())
+//                    .cidrBlocks(destinationCidrPublic)
+//                    .build());
+        }
+
+        var securityGroupRuleAll = new SecurityGroupRule("AllInboundRuleForEC2On " + 22, SecurityGroupRuleArgs.builder()
+                .type("ingress")
+                .fromPort(22)
+                .toPort(22)
+                .protocol("tcp")
+                .securityGroupId(securityGroupForEC2.id())
+                .cidrBlocks(destinationCidrPublic)
+                .build());
+
+        // Adding ingress and egress to allow traffic for Application Security Group
+        for (String allowedPort : allowedPortsForEC2) {
+            int port = Integer.parseInt(allowedPort);
+            var securityGroupRule = new SecurityGroupRule("InboundRuleForEC2On " + port, SecurityGroupRuleArgs.builder()
+                    .type("ingress")
                     .fromPort(port)
                     .toPort(port)
                     .protocol("tcp")
+                    .sourceSecurityGroupId(securityGroupForLB.id())
                     .securityGroupId(securityGroupForEC2.id())
-                    .cidrBlocks(destinationCidrPublic)
                     .build());
         }
+
 
         // Create a Security Group for RDS Instances
         var rdsSecurityGroup = new SecurityGroup(rdsSecurityGroupName, SecurityGroupArgs.builder()
@@ -144,7 +177,7 @@ public class App {
                 .build());
 
         // RDS Security Group rule to allow Inbound traffic from EC2 security group
-        var rdsSecurityGroupRule = new SecurityGroupRule("allow EC2 on " + databasePort, SecurityGroupRuleArgs.builder()
+        var rdsSecurityGroupRule = new SecurityGroupRule("InboundRuleForEC2On " + databasePort, SecurityGroupRuleArgs.builder()
                 .type("ingress")
                 .fromPort(databasePort)
                 .toPort(databasePort)
@@ -154,14 +187,17 @@ public class App {
                 .build());
 
         // Outbound rule to allow outbound traffic for EC2
-        var outboundRule = new SecurityGroupRule("Outbound Rule", SecurityGroupRuleArgs.builder()
-                .type("egress")
-                .fromPort(databasePort)
-                .toPort(databasePort)
-                .protocol("tcp")
-                .securityGroupId(securityGroupForEC2.id())
-                .cidrBlocks(destinationCidrPublic)
-                .build());
+        for (String allowedPort : outboundPortsForEC2) {
+            int port = Integer.parseInt(allowedPort);
+            var outboundRule = new SecurityGroupRule("OutboundRuleForEC2On " + port, SecurityGroupRuleArgs.builder()
+                    .type("egress")
+                    .fromPort(port)
+                    .toPort(port)
+                    .protocol("tcp")
+                    .securityGroupId(securityGroupForEC2.id())
+                    .cidrBlocks(destinationCidrPublic)
+                    .build());
+        }
 
         // Create DB Parameter group
         ParameterGroup rdsDBParameterGroup = new ParameterGroup("rdsgroup", ParameterGroupArgs.builder()
@@ -233,6 +269,10 @@ public class App {
                     rdsUsername, rdsPassword, v, databasePort, rdsDBName
             ));
 
+            Output<String> encodedUserData = userDataScript.applyValue(data -> {
+                return Base64.getEncoder().encodeToString(data.getBytes());
+            });
+
             //creating an assumeRolePolicy for EC2 instance
             final var instanceAssumeRolePolicy = IamFunctions.getPolicyDocument(GetPolicyDocumentArgs.builder()
                     .statements(GetPolicyDocumentStatementArgs.builder()
@@ -246,14 +286,46 @@ public class App {
                     .build());
 
             //creating a role
-            var role = new Role(CWRoleName, RoleArgs.builder()
+            var cwRole = new Role(CWRoleName, RoleArgs.builder()
                     .assumeRolePolicy(instanceAssumeRolePolicy.applyValue(GetPolicyDocumentResult::json))
                     .managedPolicyArns(ServerAgentPolicyARN)
                     .build());
 
             //creating instance profile for role
             var instanceProfile = new InstanceProfile("instanceProfile", InstanceProfileArgs.builder()
-                    .role(role.id())
+                    .role(cwRole.id())
+                    .build());
+
+            var launchTemplateForEC2 = new LaunchTemplate("testTemplateApp", LaunchTemplateArgs.builder()
+                    .imageId(amiId)
+                    .instanceType(ec2InstanceType)
+                    .keyName(sshKeyName)
+                    .blockDeviceMappings(LaunchTemplateBlockDeviceMappingArgs.builder()
+                            .deviceName(ec2DeviceName)
+                            .ebs(LaunchTemplateBlockDeviceMappingEbsArgs.builder()
+                                    .deleteOnTermination("true")
+                                    .volumeType(ec2VolumeType)
+                                    .volumeSize(ec2Volume)
+                                    .build())
+                            .build())
+                    .vpcSecurityGroupIds(securityGroupForEC2.id().applyValue(Collections::singletonList))
+                    .disableApiTermination(false)
+                    .iamInstanceProfile(LaunchTemplateIamInstanceProfileArgs.builder()
+                            .arn(instanceProfile.arn())
+                            .build())
+                    .metadataOptions(LaunchTemplateMetadataOptionsArgs.builder()
+                            .instanceMetadataTags("enabled")
+                            .build())
+                    .userData(encodedUserData)
+                    .tags(Map.of("Name","testTemplateApp"))
+                    .build());
+
+            var loadBalancer = new LoadBalancer("LoadBalancerForEC2", LoadBalancerArgs.builder()
+
+                    .build());
+
+            var asg = new Group("sf", GroupArgs.builder()
+
                     .build());
 
             // Create EC2 instance
@@ -275,14 +347,14 @@ public class App {
                     .tags(Map.of("Name", ec2Name))
                     .build());
 
-            //eip association
-            var eip = new Eip("eip", EipArgs.builder()
-                    .domain("vpc")
-                    .build());
-            var eipAssociation = new EipAssociation("eipass", EipAssociationArgs.builder()
-                    .instanceId(instance.id())
-                    .allocationId(eip.id())
-                    .build());
+//            //eip association
+//            var eip = new Eip("eip", EipArgs.builder()
+//                    .domain("vpc")
+//                    .build());
+//            var eipAssociation = new EipAssociation("eipass", EipAssociationArgs.builder()
+//                    .instanceId(instance.id())
+//                    .allocationId(eip.id())
+//                    .build());
 
             //creating A Record
             var record = new Record("www", RecordArgs.builder()
@@ -290,7 +362,7 @@ public class App {
                     .name(domainName)
                     .type("A")
                     .ttl(60)
-                    .records(eip.publicIp().applyValue((Collections::singletonList)))
+                    .records(instance.publicIp().applyValue((Collections::singletonList)))
                     .build());
 
             return null;

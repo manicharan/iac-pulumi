@@ -13,16 +13,16 @@ config:
   publicRoute: publicRouteAll
   destinationCidrPublic: 0.0.0.0/0
   num_of_subnets: 3
-  ports: 22,80,443,8080
+  allowedPortsForEC2: 22,80,443,8080
   volume: 25
   amiId: ami-0d6ad1ea65bedb25c
   sshKeyName: packer_ami
-  securityGroupName: application security group
+  ec2SecurityGroupName: Application Security Group
   deviceName: /dev/xvda
   instanceType: t2.micro
   volumeType: gp2
   ec2Name: webapp
-  rdsSecurityGroupName: Database security group
+  rdsSecurityGroupName: Database Security Group
   databasePort: 3306
   instanceIdentifier: csye6225
   rdsUsername: csye6225
@@ -38,4 +38,3 @@ config:
   ServerAgentPolicyARN: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
   domainZoneId: Z084093412ZXVEXEGYTX6
   domainName: demo.manicharanreddy.com
-
