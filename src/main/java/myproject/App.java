@@ -392,6 +392,30 @@ public class App {
                     .dimensions(asg.name().applyValue(name -> Collections.singletonMap("AutoScalingGroupName", name)))
                     .build());
 
+            Policy downPolicy = new Policy("downPolicy", PolicyArgs.builder()
+                    .autoscalingGroupName(asg.name())
+                    .adjustmentType("ChangeInCapacity")
+                    .policyType("StepScaling")
+                    .stepAdjustments(PolicyStepAdjustmentArgs.builder()
+                            .metricIntervalUpperBound("0")
+                            .scalingAdjustment(-1)
+                            .build())
+                    .build());
+
+
+            // custom alarms for high and low CPU utilization
+            MetricAlarm downAlarm = new MetricAlarm("cpuLow", MetricAlarmArgs.builder()
+                    .comparisonOperator("LessThanThreshold")
+                    .evaluationPeriods(1)
+                    .metricName("CPUUtilization")
+                    .namespace("AWS/EC2")
+                    .period(60)
+                    .statistic("Average")
+                    .threshold(2.0)
+                    .alarmActions(downPolicy.arn().applyValue(Collections::singletonList))
+                    .dimensions(asg.name().applyValue(name -> Collections.singletonMap("AutoScalingGroupName", name)))
+                    .build());
+
 //            var policy = new Policy("autoScale", PolicyArgs.builder()
 //                    .autoscalingGroupName(asg.name())
 //                    .policyType("TargetTrackingScaling")
@@ -403,18 +427,6 @@ public class App {
 //                            .build())
 //                    .build());
 
-//            var policy = new Policy("autoscalePolicy", PolicyArgs.builder()
-//                    .autoscalingGroupName(asg.name())
-//                    .stepAdjustments()
-//                    .policyType()
-//                    .targetTrackingConfiguration(PolicyTargetTrackingConfigurationArgs.builder()
-//                            .predefinedMetricSpecification(PolicyTargetTrackingConfigurationPredefinedMetricSpecificationArgs.builder()
-//                                    .predefinedMetricType()
-//                                    .
-//                                    .build())
-//                            .targetValue()
-//                            .build())
-//                    .build());
 
             var loadBalancer = new LoadBalancer("LoadBalancerForEC2", LoadBalancerArgs.builder()
                     .loadBalancerType("application")
