@@ -3,8 +3,11 @@ package myproject;
 import com.pulumi.Context;
 import com.pulumi.Pulumi;
 import com.pulumi.aws.AwsFunctions;
+import com.pulumi.aws.autoscaling.Attachment;
+import com.pulumi.aws.autoscaling.AttachmentArgs;
 import com.pulumi.aws.autoscaling.Group;
 import com.pulumi.aws.autoscaling.GroupArgs;
+import com.pulumi.aws.autoscaling.inputs.GroupLaunchTemplateArgs;
 import com.pulumi.aws.ec2.*;
 import com.pulumi.aws.ec2.inputs.*;
 import com.pulumi.aws.iam.*;
@@ -13,16 +16,15 @@ import com.pulumi.aws.iam.inputs.GetPolicyDocumentStatementArgs;
 import com.pulumi.aws.iam.inputs.GetPolicyDocumentStatementPrincipalArgs;
 import com.pulumi.aws.iam.outputs.GetPolicyDocumentResult;
 import com.pulumi.aws.inputs.GetAvailabilityZonesArgs;
-import com.pulumi.aws.lb.LoadBalancer;
-import com.pulumi.aws.lb.LoadBalancerArgs;
+import com.pulumi.aws.lb.*;
+import com.pulumi.aws.lb.inputs.ListenerDefaultActionArgs;
+import com.pulumi.aws.lb.inputs.TargetGroupHealthCheckArgs;
 import com.pulumi.aws.outputs.GetAvailabilityZonesResult;
 import com.pulumi.aws.outputs.GetRegionResult;
 import com.pulumi.aws.rds.ParameterGroup;
 import com.pulumi.aws.rds.ParameterGroupArgs;
 import com.pulumi.aws.rds.SubnetGroup;
 import com.pulumi.aws.rds.SubnetGroupArgs;
-import com.pulumi.aws.route53.Record;
-import com.pulumi.aws.route53.RecordArgs;
 import com.pulumi.core.Output;
 
 import java.util.*;
@@ -88,6 +90,7 @@ public class App {
                 .instanceTenancy("default")
                 .tags(Map.of("Name", vpcName))
                 .build());
+        //write outbound rule for load balancer
 
         // Create an Internet Gateway and attach VPC to it
         var igw = new InternetGateway(igwName, new InternetGatewayArgs.Builder()
@@ -126,7 +129,7 @@ public class App {
                 .tags(Map.of("Name", ec2SecurityGroupName))
                 .build());
 
-        // Adding ingress and egress to allow traffic for Application Security Group
+        // Adding ingress and egress to allow traffic for Load Balancer Security Group
         for (String allowedPort : allowedPortsForLB) {
             int port = Integer.parseInt(allowedPort);
             var securityGroupRule = new SecurityGroupRule("InboundRuleForLBOn " + port, SecurityGroupRuleArgs.builder()
@@ -137,16 +140,27 @@ public class App {
                     .securityGroupId(securityGroupForLB.id())
                     .cidrBlocks(destinationCidrPublic)
                     .build());
-//            var outboundRule = new SecurityGroupRule("OutboundRuleForLBOn " + port, SecurityGroupRuleArgs.builder()
-//                    .type("egress")
-//                    .fromPort(port)
-//                    .toPort(port)
-//                    .protocol("tcp")
-//                    .securityGroupId(securityGroupForLB.id())
-//                    .cidrBlocks(destinationCidrPublic)
-//                    .build());
+            var outboundRule = new SecurityGroupRule("OutboundRuleForLBOn " + port, SecurityGroupRuleArgs.builder()
+                    .type("egress")
+                    .fromPort(port)
+                    .toPort(port)
+                    .protocol("tcp")
+                    .securityGroupId(securityGroupForLB.id())
+                    .cidrBlocks(destinationCidrPublic)
+                    .build());
         }
 
+        //adding egress for LB on port 8080
+        var outboundRuleforLB = new SecurityGroupRule("OutboundRuleForLBOn "+8080, SecurityGroupRuleArgs.builder()
+                .type("egress")
+                .fromPort(8080)
+                .toPort(8080)
+                .protocol("tcp")
+                .securityGroupId(securityGroupForLB.id())
+                .cidrBlocks(destinationCidrPublic)
+                .build());
+
+        // all traffic for EC2 on port 22
         var securityGroupRuleAll = new SecurityGroupRule("AllInboundRuleForEC2On " + 22, SecurityGroupRuleArgs.builder()
                 .type("ingress")
                 .fromPort(22)
@@ -312,20 +326,93 @@ public class App {
                     .disableApiTermination(false)
                     .iamInstanceProfile(LaunchTemplateIamInstanceProfileArgs.builder()
                             .arn(instanceProfile.arn())
-                            .build())
+                            .build())//can attach network interface here
                     .metadataOptions(LaunchTemplateMetadataOptionsArgs.builder()
                             .instanceMetadataTags("enabled")
                             .build())
                     .userData(encodedUserData)
                     .tags(Map.of("Name","testTemplateApp"))
+                    .tagSpecifications(LaunchTemplateTagSpecificationArgs.builder()
+                            .resourceType("instance")
+                            .tags(Map.of("Name","webapp"))
+                            .build())
                     .build());
+
+//            List<String> vpcZoneIdentifiers = publicSubnets.stream()
+//                    .map(Subnet::getId)
+//                    .collect(Collectors.toList());
+//            String vpcZoneIdentifier = .stream()
+//                    .map(Subnet::getId)
+//                    .collect(Collectors.joining(","));
+
+            var asg = new Group("autoScalingGroup", GroupArgs.builder()
+                    .minSize(1)
+                    .maxSize(3)
+                    .desiredCapacity(1)
+                    .defaultCooldown(60)
+                    .defaultInstanceWarmup(120)
+                    .launchTemplate(GroupLaunchTemplateArgs.builder()
+                            .name(launchTemplateForEC2.name())
+                            .version("$Latest")
+                            .build())
+                    .vpcZoneIdentifiers(Output.all(publicSubnets.stream()
+                            .map(Subnet::id)
+                            .collect(toList()))
+                            )
+                    .build());
+
+//            var scaleUpPolicy = new Policy("scaleUp", PolicyArgs.builder()
+//                    .autoscalingGroupName(asg.name())
+//                    .stepAdjustments()
+//                    .policyType()
+//                    .targetTrackingConfiguration(PolicyTargetTrackingConfigurationArgs.builder()
+//                            .predefinedMetricSpecification(PolicyTargetTrackingConfigurationPredefinedMetricSpecificationArgs.builder()
+//                                    .predefinedMetricType()
+//                                    .
+//                                    .build())
+//                            .targetValue()
+//                            .build())
+//                    .build());
 
             var loadBalancer = new LoadBalancer("LoadBalancerForEC2", LoadBalancerArgs.builder()
-
+                    .loadBalancerType("application")
+                    .securityGroups(securityGroupForLB.id().applyValue(Collections::singletonList))
+                    .subnets(Output.all(publicSubnets.stream()
+                            .map(Subnet::id)
+                            .collect(toList()))
+                            )
                     .build());
 
-            var asg = new Group("sf", GroupArgs.builder()
-
+//            var targetGroup = new TargetGroup("targetGroup", TargetGroupArgs.builder()
+//                    .port(8080)
+//                    .protocol("HTTP")
+//                    .vpcId(vpc.id())
+//                    .build());
+            var targetGroup = new TargetGroup("targetGroupForLB", new TargetGroupArgs.Builder()
+                    .port(8080)
+                    .protocol("HTTP")
+                    .vpcId(vpc.id())
+                    .healthCheck(TargetGroupHealthCheckArgs.builder()
+                            .enabled(true)
+                            .interval(30)
+                            .port("8080")
+                            .path("/healthz")
+                            .protocol("HTTP").build())
+                    .build());
+//
+//
+            var listener = new Listener("listener", ListenerArgs.builder()
+                    .loadBalancerArn(loadBalancer.arn())
+                    .port(80)
+                    .defaultActions(ListenerDefaultActionArgs.builder()
+                            .type("forward")
+                            .targetGroupArn(targetGroup.arn())
+                            .build())
+                    .build());
+////
+            var attachment = new Attachment("autoscaleattachment", AttachmentArgs.builder()
+                    .autoscalingGroupName(asg.name())
+                    .lbTargetGroupArn(targetGroup.arn())
                     .build());
 
             // Create EC2 instance
@@ -357,13 +444,13 @@ public class App {
 //                    .build());
 
             //creating A Record
-            var record = new Record("www", RecordArgs.builder()
-                    .zoneId(domainZoneId)
-                    .name(domainName)
-                    .type("A")
-                    .ttl(60)
-                    .records(instance.publicIp().applyValue((Collections::singletonList)))
-                    .build());
+//            var record = new Record("www", RecordArgs.builder()
+//                    .zoneId(domainZoneId)
+//                    .name(domainName)
+//                    .type("A")
+//                    .ttl(60)
+//                    .records(instance.publicIp().applyValue((Collections::singletonList)))
+//                    .build());
 
             return null;
         });

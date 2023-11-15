@@ -15,13 +15,13 @@ config:
   num_of_subnets: 3
   allowedPortsForEC2: 8080
   volume: 25
-  amiId: ami-008ad5e8ef139063c
+  amiId: ami-01716a566d3bea655
   sshKeyName: packer_dev
   ec2SecurityGroupName: Application Security Group
   deviceName: /dev/xvda
   instanceType: t2.micro
   volumeType: gp2
-  ec2Name: webapp1
+  ec2Name: webapp2
   rdsSecurityGroupName: Database Security Group
   databasePort: 3306
   instanceIdentifier: csye6225
