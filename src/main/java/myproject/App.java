@@ -65,7 +65,7 @@ public class App {
         String publicRouteAllowAll = config.require("publicRoute");
         String destinationCidrPublic = config.require("destinationCidrPublic");
         int num_of_subnets = config.requireInteger("num_of_subnets");
-        String[] allowedPortsForEC2 = config.require("allowedPortsForEC2").split(",");
+        int applicationPortForEC2 = config.requireInteger("applicationPortForEC2");
         int ec2Volume = config.requireInteger("volume");
         String amiId = config.require("amiId");
         String sshKeyName = config.require("sshKeyName");
@@ -93,6 +93,13 @@ public class App {
         String lbSecurityGroupName = config.require("lbSecurityGroupName");
         String[] allowedPortsForLB = config.require("allowedPortsForLB").split(",");
         String[] outboundPortsForEC2 = config.require("outboundPortsForEC2").split(",");
+        String healthCheckPath = config.require("healthCheckPath");
+        int minInstances = config.requireInteger("minInstances");
+        int maxInstances = config.requireInteger("maxInstances");
+        int desiredCapacity = config.requireInteger("desiredCapacity");
+        int instanceWarmUpTime = config.requireInteger("instanceWarmUpTime");
+        String loadBalancerType = config.require("loadBalancerType");
+        String metricName = config.require("metricName");
 
         // Create a VPC
         var vpc = new Vpc(vpcName, VpcArgs.builder()
@@ -160,17 +167,17 @@ public class App {
                     .build());
         }
 
-        //adding egress for LB on port 8080
-        var outboundRuleforLB = new SecurityGroupRule("OutboundRuleForLBOn "+8080, SecurityGroupRuleArgs.builder()
+        //adding egress for LB on application port
+        var outboundRuleforLB = new SecurityGroupRule("OutboundRuleForLBOn "+applicationPortForEC2, SecurityGroupRuleArgs.builder()
                 .type("egress")
-                .fromPort(8080)
-                .toPort(8080)
+                .fromPort(applicationPortForEC2)
+                .toPort(applicationPortForEC2)
                 .protocol("tcp")
                 .securityGroupId(securityGroupForLB.id())
                 .cidrBlocks(destinationCidrPublic)
                 .build());
 
-        // all traffic for EC2 on port 22
+        // all traffic for Application Security Group on port 22
         var securityGroupRuleAll = new SecurityGroupRule("AllInboundRuleForEC2On " + 22, SecurityGroupRuleArgs.builder()
                 .type("ingress")
                 .fromPort(22)
@@ -180,18 +187,15 @@ public class App {
                 .cidrBlocks(destinationCidrPublic)
                 .build());
 
-        // Adding ingress and egress to allow traffic for Application Security Group
-        for (String allowedPort : allowedPortsForEC2) {
-            int port = Integer.parseInt(allowedPort);
-            var securityGroupRule = new SecurityGroupRule("InboundRuleForEC2On " + port, SecurityGroupRuleArgs.builder()
+        // Adding ingress on application port for Application Security Group
+            var securityGroupRule = new SecurityGroupRule("InboundRuleForEC2On " + applicationPortForEC2, SecurityGroupRuleArgs.builder()
                     .type("ingress")
-                    .fromPort(port)
-                    .toPort(port)
+                    .fromPort(applicationPortForEC2)
+                    .toPort(applicationPortForEC2)
                     .protocol("tcp")
                     .sourceSecurityGroupId(securityGroupForLB.id())
                     .securityGroupId(securityGroupForEC2.id())
                     .build());
-        }
 
 
         // Create a Security Group for RDS Instances
@@ -201,7 +205,7 @@ public class App {
                 .build());
 
         // RDS Security Group rule to allow Inbound traffic from EC2 security group
-        var rdsSecurityGroupRule = new SecurityGroupRule("InboundRuleForEC2On " + databasePort, SecurityGroupRuleArgs.builder()
+        var rdsSecurityGroupRule = new SecurityGroupRule("InboundRuleForRDSOn " + databasePort, SecurityGroupRuleArgs.builder()
                 .type("ingress")
                 .fromPort(databasePort)
                 .toPort(databasePort)
@@ -320,7 +324,8 @@ public class App {
                     .role(cwRole.id())
                     .build());
 
-            var launchTemplateForEC2 = new LaunchTemplate("ec2LaunchTemplate", LaunchTemplateArgs.builder()
+            // creating launch template for EC2
+            var launchTemplateForEC2 = new LaunchTemplate("launchTemplateForEC2", LaunchTemplateArgs.builder()
                     .imageId(amiId)
                     .instanceType(ec2InstanceType)
                     .keyName(sshKeyName)
@@ -332,7 +337,6 @@ public class App {
                                     .volumeSize(ec2Volume)
                                     .build())
                             .build())
-//                    .vpcSecurityGroupIds(securityGroupForEC2.id().applyValue(Collections::singletonList))
                     .disableApiTermination(false)
                     .networkInterfaces(LaunchTemplateNetworkInterfaceArgs.builder()
                             .associatePublicIpAddress("true")
@@ -341,24 +345,25 @@ public class App {
                             .build())
                     .iamInstanceProfile(LaunchTemplateIamInstanceProfileArgs.builder()
                             .arn(instanceProfile.arn())
-                            .build())//can attach network interface here
+                            .build())
                     .metadataOptions(LaunchTemplateMetadataOptionsArgs.builder()
                             .instanceMetadataTags("enabled")
                             .build())
                     .userData(encodedUserData)
-                    .tags(Map.of("Name","testTemplateApp"))
+                    .tags(Map.of("Name","launchTemplateForEC2"))
                     .tagSpecifications(LaunchTemplateTagSpecificationArgs.builder()
                             .resourceType("instance")
-                            .tags(Map.of("Name","webapp"))
+                            .tags(Map.of("Name",ec2Name))
                             .build())
                     .build());
 
-            var asg = new Group("autoScalingGroup", GroupArgs.builder()
-                    .minSize(1)
-                    .maxSize(3)
-                    .desiredCapacity(1)
+            // Auto Scaling Group for EC2
+            var asg = new Group("autoScalingGroupForEC2", GroupArgs.builder()
+                    .minSize(minInstances)
+                    .maxSize(maxInstances)
+                    .desiredCapacity(desiredCapacity)
                     .defaultCooldown(60)
-                    .defaultInstanceWarmup(120)
+                    .defaultInstanceWarmup(instanceWarmUpTime)
                     .launchTemplate(GroupLaunchTemplateArgs.builder()
                             .name(launchTemplateForEC2.name())
                             .version("$Latest")
@@ -369,6 +374,7 @@ public class App {
                             )
                     .build());
 
+            // ScaleUp policy
             Policy upPolicy = new Policy("upPolicy", PolicyArgs.builder()
                     .autoscalingGroupName(asg.name())
                     .adjustmentType("ChangeInCapacity")
@@ -379,19 +385,7 @@ public class App {
                             .build())
                     .build());
 
-            // custom alarms for high and low CPU utilization
-            MetricAlarm upAlarm = new MetricAlarm("cpuHigh", MetricAlarmArgs.builder()
-                    .comparisonOperator("GreaterThanThreshold")
-                    .evaluationPeriods(1)
-                    .metricName("CPUUtilization")
-                    .namespace("AWS/EC2")
-                    .period(60)
-                    .statistic("Average")
-                    .threshold(3.0)
-                    .alarmActions(upPolicy.arn().applyValue(Collections::singletonList))
-                    .dimensions(asg.name().applyValue(name -> Collections.singletonMap("AutoScalingGroupName", name)))
-                    .build());
-
+            // ScaleDown policy
             Policy downPolicy = new Policy("downPolicy", PolicyArgs.builder()
                     .autoscalingGroupName(asg.name())
                     .adjustmentType("ChangeInCapacity")
@@ -402,12 +396,24 @@ public class App {
                             .build())
                     .build());
 
+            // alarm for ScaleUp policy
+            MetricAlarm upAlarm = new MetricAlarm("cpuHigh", MetricAlarmArgs.builder()
+                    .comparisonOperator("GreaterThanThreshold")
+                    .evaluationPeriods(1)
+                    .metricName(metricName)
+                    .namespace("AWS/EC2")
+                    .period(60)
+                    .statistic("Average")
+                    .threshold(3.0)
+                    .alarmActions(upPolicy.arn().applyValue(Collections::singletonList))
+                    .dimensions(asg.name().applyValue(name -> Collections.singletonMap("AutoScalingGroupName", name)))
+                    .build());
 
-            // custom alarms for high and low CPU utilization
+            // alarm for scale down policy
             MetricAlarm downAlarm = new MetricAlarm("cpuLow", MetricAlarmArgs.builder()
                     .comparisonOperator("LessThanThreshold")
                     .evaluationPeriods(1)
-                    .metricName("CPUUtilization")
+                    .metricName(metricName)
                     .namespace("AWS/EC2")
                     .period(60)
                     .statistic("Average")
@@ -416,20 +422,9 @@ public class App {
                     .dimensions(asg.name().applyValue(name -> Collections.singletonMap("AutoScalingGroupName", name)))
                     .build());
 
-//            var policy = new Policy("autoScale", PolicyArgs.builder()
-//                    .autoscalingGroupName(asg.name())
-//                    .policyType("TargetTrackingScaling")
-//                    .targetTrackingConfiguration(PolicyTargetTrackingConfigurationArgs.builder()
-//                            .predefinedMetricSpecification(PolicyTargetTrackingConfigurationPredefinedMetricSpecificationArgs.builder()
-//                                    .predefinedMetricType("ASGAverageCPUUtilization")
-//                                    .build())
-//                            .targetValue(1.3)
-//                            .build())
-//                    .build());
-
-
+            // creating a load balancer
             var loadBalancer = new LoadBalancer("LoadBalancerForEC2", LoadBalancerArgs.builder()
-                    .loadBalancerType("application")
+                    .loadBalancerType(loadBalancerType)
                     .securityGroups(securityGroupForLB.id().applyValue(Collections::singletonList))
                     .subnets(Output.all(publicSubnets.stream()
                             .map(Subnet::id)
@@ -437,19 +432,21 @@ public class App {
                             )
                     .build());
 
+            // creating a target group for load balancer
             var targetGroup = new TargetGroup("targetGroupForLB", new TargetGroupArgs.Builder()
-                    .port(8080)
+                    .port(applicationPortForEC2)
                     .protocol("HTTP")
                     .vpcId(vpc.id())
                     .healthCheck(TargetGroupHealthCheckArgs.builder()
                             .enabled(true)
                             .interval(30)
-                            .port("8080")
-                            .path("/healthz")
+                            .port(String.valueOf(applicationPortForEC2))
+                            .path(healthCheckPath)
                             .protocol("HTTP").build())
                     .build());
 
-            var listener = new Listener("listener", ListenerArgs.builder()
+            // creating a listener for load balancer
+            var listener = new Listener("listenerForLB", ListenerArgs.builder()
                     .loadBalancerArn(loadBalancer.arn())
                     .port(80)
                     .defaultActions(ListenerDefaultActionArgs.builder()
@@ -458,23 +455,22 @@ public class App {
                             .build())
                     .build());
 
-            var attachment = new Attachment("autoscaleattachment", AttachmentArgs.builder()
+            //attaching target group to load balancer
+            var attachment = new Attachment("autoscaleAttachment", AttachmentArgs.builder()
                     .autoscalingGroupName(asg.name())
                     .lbTargetGroupArn(targetGroup.arn())
                     .build());
 
-            //creating A Record
+            //creating A Record for load balancer
             var record = new Record("www", RecordArgs.builder()
                     .zoneId(domainZoneId)
                     .name(domainName)
                     .type("A")
-//                    .ttl(60)
                     .aliases(RecordAliasArgs.builder()
                             .name(loadBalancer.dnsName())
                             .zoneId(loadBalancer.zoneId())
                             .evaluateTargetHealth(true)
                             .build())
-//                    .records(loadBalancer.dnsName().applyValue((Collections::singletonList)))
                     .build());
 
             return null;

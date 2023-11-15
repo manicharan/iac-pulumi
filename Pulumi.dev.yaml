@@ -13,15 +13,15 @@ config:
   publicRoute: publicRouteAll
   destinationCidrPublic: 0.0.0.0/0
   num_of_subnets: 3
-  allowedPortsForEC2: 8080
+  applicationPortForEC2: 8080
   volume: 25
-  amiId: ami-01716a566d3bea655
+  amiId: ami-0d2b41d57f9bd792a
   sshKeyName: packer_dev
   ec2SecurityGroupName: Application Security Group
   deviceName: /dev/xvda
   instanceType: t2.micro
   volumeType: gp2
-  ec2Name: webapp2
+  ec2Name: webapp
   rdsSecurityGroupName: Database Security Group
   databasePort: 3306
   instanceIdentifier: csye6225
@@ -41,3 +41,10 @@ config:
   lbSecurityGroupName: Load Balancer Security Group
   allowedPortsForLB: 80,443
   outboundPortsForEC2: 443,3306
+  healthCheckPath: /healthz
+  minInstances: 1
+  maxInstances: 3
+  desiredCapacity: 1
+  instanceWarmUpTime: 120
+  loadBalancerType: application
+  metricName: CPUUtilization

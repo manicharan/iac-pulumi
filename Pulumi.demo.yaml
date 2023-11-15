@@ -1,7 +1,7 @@
 config:
   aws:profile: demo
   aws:region: us-east-1
-  cidrBlock: 172.0.0.0/16
+  cidrBlock: 10.0.0.0/16
   vpcName: vpcMani
   internetGatewayName: igwMani
   publicRouteTable: publicRTMani
@@ -13,9 +13,9 @@ config:
   publicRoute: publicRouteAll
   destinationCidrPublic: 0.0.0.0/0
   num_of_subnets: 3
-  allowedPortsForEC2: 22,80,443,8080
+  applicationPortForEC2: 8080
   volume: 25
-  amiId: ami-0d6ad1ea65bedb25c
+  amiId: ami-0d2b41d57f9bd792a
   sshKeyName: packer_ami
   ec2SecurityGroupName: Application Security Group
   deviceName: /dev/xvda
@@ -38,3 +38,13 @@ config:
   ServerAgentPolicyARN: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
   domainZoneId: Z084093412ZXVEXEGYTX6
   domainName: demo.manicharanreddy.com
+  lbSecurityGroupName: Load Balancer Security Group
+  allowedPortsForLB: 80,443
+  outboundPortsForEC2: 443,3306
+  healthCheckPath: /healthz
+  minInstances: 1
+  maxInstances: 3
+  desiredCapacity: 1
+  instanceWarmUpTime: 120
+  loadBalancerType: application
+  metricName: CPUUtilization
