@@ -7,7 +7,14 @@ import com.pulumi.aws.autoscaling.Attachment;
 import com.pulumi.aws.autoscaling.AttachmentArgs;
 import com.pulumi.aws.autoscaling.Group;
 import com.pulumi.aws.autoscaling.GroupArgs;
+import com.pulumi.aws.autoscaling.Policy;
+import com.pulumi.aws.autoscaling.PolicyArgs;
 import com.pulumi.aws.autoscaling.inputs.GroupLaunchTemplateArgs;
+import com.pulumi.aws.autoscaling.inputs.PolicyStepAdjustmentArgs;
+import com.pulumi.aws.autoscaling.inputs.PolicyTargetTrackingConfigurationArgs;
+import com.pulumi.aws.autoscaling.inputs.PolicyTargetTrackingConfigurationPredefinedMetricSpecificationArgs;
+import com.pulumi.aws.cloudwatch.MetricAlarm;
+import com.pulumi.aws.cloudwatch.MetricAlarmArgs;
 import com.pulumi.aws.ec2.*;
 import com.pulumi.aws.ec2.inputs.*;
 import com.pulumi.aws.iam.*;
@@ -25,7 +32,10 @@ import com.pulumi.aws.rds.ParameterGroup;
 import com.pulumi.aws.rds.ParameterGroupArgs;
 import com.pulumi.aws.rds.SubnetGroup;
 import com.pulumi.aws.rds.SubnetGroupArgs;
+import com.pulumi.aws.route53.RecordArgs;
+import com.pulumi.aws.route53.inputs.RecordAliasArgs;
 import com.pulumi.core.Output;
+import com.pulumi.aws.route53.Record;
 
 import java.util.*;
 
@@ -245,7 +255,7 @@ public class App {
                         .build());
             }
 
-            // Create a subnet group for your RDS instance
+            // Create a subnet group for RDS instance
             SubnetGroup dbSubnetGroup = new SubnetGroup("subnetgroup", SubnetGroupArgs.builder()
                     .subnetIds(Output.all(privateSubnets.stream().map(Subnet::id).collect(toList())))
                     .name("subnetgroup")
@@ -310,7 +320,7 @@ public class App {
                     .role(cwRole.id())
                     .build());
 
-            var launchTemplateForEC2 = new LaunchTemplate("testTemplateApp", LaunchTemplateArgs.builder()
+            var launchTemplateForEC2 = new LaunchTemplate("ec2LaunchTemplate", LaunchTemplateArgs.builder()
                     .imageId(amiId)
                     .instanceType(ec2InstanceType)
                     .keyName(sshKeyName)
@@ -322,8 +332,13 @@ public class App {
                                     .volumeSize(ec2Volume)
                                     .build())
                             .build())
-                    .vpcSecurityGroupIds(securityGroupForEC2.id().applyValue(Collections::singletonList))
+//                    .vpcSecurityGroupIds(securityGroupForEC2.id().applyValue(Collections::singletonList))
                     .disableApiTermination(false)
+                    .networkInterfaces(LaunchTemplateNetworkInterfaceArgs.builder()
+                            .associatePublicIpAddress("true")
+                            .subnetId(publicSubnets.get(0).id().applyValue(f-> f))
+                            .securityGroups(securityGroupForEC2.id().applyValue(Collections::singletonList))
+                            .build())
                     .iamInstanceProfile(LaunchTemplateIamInstanceProfileArgs.builder()
                             .arn(instanceProfile.arn())
                             .build())//can attach network interface here
@@ -337,13 +352,6 @@ public class App {
                             .tags(Map.of("Name","webapp"))
                             .build())
                     .build());
-
-//            List<String> vpcZoneIdentifiers = publicSubnets.stream()
-//                    .map(Subnet::getId)
-//                    .collect(Collectors.toList());
-//            String vpcZoneIdentifier = .stream()
-//                    .map(Subnet::getId)
-//                    .collect(Collectors.joining(","));
 
             var asg = new Group("autoScalingGroup", GroupArgs.builder()
                     .minSize(1)
@@ -361,7 +369,41 @@ public class App {
                             )
                     .build());
 
-//            var scaleUpPolicy = new Policy("scaleUp", PolicyArgs.builder()
+            Policy upPolicy = new Policy("upPolicy", PolicyArgs.builder()
+                    .autoscalingGroupName(asg.name())
+                    .adjustmentType("ChangeInCapacity")
+                    .policyType("StepScaling")
+                    .stepAdjustments(PolicyStepAdjustmentArgs.builder()
+                            .metricIntervalLowerBound("0")
+                            .scalingAdjustment(1)
+                            .build())
+                    .build());
+
+            // custom alarms for high and low CPU utilization
+            MetricAlarm upAlarm = new MetricAlarm("cpuHigh", MetricAlarmArgs.builder()
+                    .comparisonOperator("GreaterThanThreshold")
+                    .evaluationPeriods(1)
+                    .metricName("CPUUtilization")
+                    .namespace("AWS/EC2")
+                    .period(60)
+                    .statistic("Average")
+                    .threshold(3.0)
+                    .alarmActions(upPolicy.arn().applyValue(Collections::singletonList))
+                    .dimensions(asg.name().applyValue(name -> Collections.singletonMap("AutoScalingGroupName", name)))
+                    .build());
+
+//            var policy = new Policy("autoScale", PolicyArgs.builder()
+//                    .autoscalingGroupName(asg.name())
+//                    .policyType("TargetTrackingScaling")
+//                    .targetTrackingConfiguration(PolicyTargetTrackingConfigurationArgs.builder()
+//                            .predefinedMetricSpecification(PolicyTargetTrackingConfigurationPredefinedMetricSpecificationArgs.builder()
+//                                    .predefinedMetricType("ASGAverageCPUUtilization")
+//                                    .build())
+//                            .targetValue(1.3)
+//                            .build())
+//                    .build());
+
+//            var policy = new Policy("autoscalePolicy", PolicyArgs.builder()
 //                    .autoscalingGroupName(asg.name())
 //                    .stepAdjustments()
 //                    .policyType()
@@ -383,11 +425,6 @@ public class App {
                             )
                     .build());
 
-//            var targetGroup = new TargetGroup("targetGroup", TargetGroupArgs.builder()
-//                    .port(8080)
-//                    .protocol("HTTP")
-//                    .vpcId(vpc.id())
-//                    .build());
             var targetGroup = new TargetGroup("targetGroupForLB", new TargetGroupArgs.Builder()
                     .port(8080)
                     .protocol("HTTP")
@@ -399,8 +436,7 @@ public class App {
                             .path("/healthz")
                             .protocol("HTTP").build())
                     .build());
-//
-//
+
             var listener = new Listener("listener", ListenerArgs.builder()
                     .loadBalancerArn(loadBalancer.arn())
                     .port(80)
@@ -409,48 +445,25 @@ public class App {
                             .targetGroupArn(targetGroup.arn())
                             .build())
                     .build());
-////
+
             var attachment = new Attachment("autoscaleattachment", AttachmentArgs.builder()
                     .autoscalingGroupName(asg.name())
                     .lbTargetGroupArn(targetGroup.arn())
                     .build());
 
-            // Create EC2 instance
-            var instance = new Instance(ec2Name, InstanceArgs.builder()
-                    .ami(amiId)
-                    .instanceType(ec2InstanceType)
-                    .keyName(sshKeyName)
-                    .ebsBlockDevices(InstanceEbsBlockDeviceArgs.builder()
-                            .deleteOnTermination(true)
-                            .deviceName(ec2DeviceName)
-                            .volumeType(ec2VolumeType)
-                            .volumeSize(ec2Volume)
-                            .build())
-                    .vpcSecurityGroupIds(securityGroupForEC2.id().applyValue(Collections::singletonList))
-                    .subnetId(publicSubnets.get(0).id())
-                    .disableApiTermination(false)
-                    .userData(userDataScript)
-                    .iamInstanceProfile(instanceProfile.id())
-                    .tags(Map.of("Name", ec2Name))
-                    .build());
-
-//            //eip association
-//            var eip = new Eip("eip", EipArgs.builder()
-//                    .domain("vpc")
-//                    .build());
-//            var eipAssociation = new EipAssociation("eipass", EipAssociationArgs.builder()
-//                    .instanceId(instance.id())
-//                    .allocationId(eip.id())
-//                    .build());
-
             //creating A Record
-//            var record = new Record("www", RecordArgs.builder()
-//                    .zoneId(domainZoneId)
-//                    .name(domainName)
-//                    .type("A")
+            var record = new Record("www", RecordArgs.builder()
+                    .zoneId(domainZoneId)
+                    .name(domainName)
+                    .type("A")
 //                    .ttl(60)
-//                    .records(instance.publicIp().applyValue((Collections::singletonList)))
-//                    .build());
+                    .aliases(RecordAliasArgs.builder()
+                            .name(loadBalancer.dnsName())
+                            .zoneId(loadBalancer.zoneId())
+                            .evaluateTargetHealth(true)
+                            .build())
+//                    .records(loadBalancer.dnsName().applyValue((Collections::singletonList)))
+                    .build());
 
             return null;
         });
