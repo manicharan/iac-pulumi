@@ -3,16 +3,13 @@ package myproject;
 import com.pulumi.Context;
 import com.pulumi.Pulumi;
 import com.pulumi.aws.AwsFunctions;
-import com.pulumi.aws.autoscaling.Attachment;
-import com.pulumi.aws.autoscaling.AttachmentArgs;
 import com.pulumi.aws.autoscaling.Group;
 import com.pulumi.aws.autoscaling.GroupArgs;
 import com.pulumi.aws.autoscaling.Policy;
 import com.pulumi.aws.autoscaling.PolicyArgs;
+import com.pulumi.aws.autoscaling.*;
 import com.pulumi.aws.autoscaling.inputs.GroupLaunchTemplateArgs;
 import com.pulumi.aws.autoscaling.inputs.PolicyStepAdjustmentArgs;
-import com.pulumi.aws.autoscaling.inputs.PolicyTargetTrackingConfigurationArgs;
-import com.pulumi.aws.autoscaling.inputs.PolicyTargetTrackingConfigurationPredefinedMetricSpecificationArgs;
 import com.pulumi.aws.cloudwatch.MetricAlarm;
 import com.pulumi.aws.cloudwatch.MetricAlarmArgs;
 import com.pulumi.aws.ec2.*;
@@ -32,10 +29,10 @@ import com.pulumi.aws.rds.ParameterGroup;
 import com.pulumi.aws.rds.ParameterGroupArgs;
 import com.pulumi.aws.rds.SubnetGroup;
 import com.pulumi.aws.rds.SubnetGroupArgs;
+import com.pulumi.aws.route53.Record;
 import com.pulumi.aws.route53.RecordArgs;
 import com.pulumi.aws.route53.inputs.RecordAliasArgs;
 import com.pulumi.core.Output;
-import com.pulumi.aws.route53.Record;
 
 import java.util.*;
 
@@ -168,7 +165,7 @@ public class App {
         }
 
         //adding egress for LB on application port
-        var outboundRuleforLB = new SecurityGroupRule("OutboundRuleForLBOn "+applicationPortForEC2, SecurityGroupRuleArgs.builder()
+        var outboundRuleforLB = new SecurityGroupRule("OutboundRuleForLBOn " + applicationPortForEC2, SecurityGroupRuleArgs.builder()
                 .type("egress")
                 .fromPort(applicationPortForEC2)
                 .toPort(applicationPortForEC2)
@@ -188,14 +185,14 @@ public class App {
                 .build());
 
         // Adding ingress on application port for Application Security Group
-            var securityGroupRule = new SecurityGroupRule("InboundRuleForEC2On " + applicationPortForEC2, SecurityGroupRuleArgs.builder()
-                    .type("ingress")
-                    .fromPort(applicationPortForEC2)
-                    .toPort(applicationPortForEC2)
-                    .protocol("tcp")
-                    .sourceSecurityGroupId(securityGroupForLB.id())
-                    .securityGroupId(securityGroupForEC2.id())
-                    .build());
+        var securityGroupRule = new SecurityGroupRule("InboundRuleForEC2On " + applicationPortForEC2, SecurityGroupRuleArgs.builder()
+                .type("ingress")
+                .fromPort(applicationPortForEC2)
+                .toPort(applicationPortForEC2)
+                .protocol("tcp")
+                .sourceSecurityGroupId(securityGroupForLB.id())
+                .securityGroupId(securityGroupForEC2.id())
+                .build());
 
 
         // Create a Security Group for RDS Instances
@@ -340,7 +337,7 @@ public class App {
                     .disableApiTermination(false)
                     .networkInterfaces(LaunchTemplateNetworkInterfaceArgs.builder()
                             .associatePublicIpAddress("true")
-                            .subnetId(publicSubnets.get(0).id().applyValue(f-> f))
+                            .subnetId(publicSubnets.get(0).id().applyValue(f -> f))
                             .securityGroups(securityGroupForEC2.id().applyValue(Collections::singletonList))
                             .build())
                     .iamInstanceProfile(LaunchTemplateIamInstanceProfileArgs.builder()
@@ -350,10 +347,10 @@ public class App {
                             .instanceMetadataTags("enabled")
                             .build())
                     .userData(encodedUserData)
-                    .tags(Map.of("Name","launchTemplateForEC2"))
+                    .tags(Map.of("Name", "launchTemplateForEC2"))
                     .tagSpecifications(LaunchTemplateTagSpecificationArgs.builder()
                             .resourceType("instance")
-                            .tags(Map.of("Name",ec2Name))
+                            .tags(Map.of("Name", ec2Name))
                             .build())
                     .build());
 
@@ -371,7 +368,7 @@ public class App {
                     .vpcZoneIdentifiers(Output.all(publicSubnets.stream()
                             .map(Subnet::id)
                             .collect(toList()))
-                            )
+                    )
                     .build());
 
             // ScaleUp policy
@@ -429,7 +426,7 @@ public class App {
                     .subnets(Output.all(publicSubnets.stream()
                             .map(Subnet::id)
                             .collect(toList()))
-                            )
+                    )
                     .build());
 
             // creating a target group for load balancer

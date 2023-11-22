@@ -15,7 +15,7 @@ config:
   num_of_subnets: 3
   applicationPortForEC2: 8080
   volume: 25
-  amiId: ami-0d2b41d57f9bd792a
+  amiId: ami-0a3a321168d87361a
   sshKeyName: packer_dev
   ec2SecurityGroupName: Application Security Group
   deviceName: /dev/xvda
