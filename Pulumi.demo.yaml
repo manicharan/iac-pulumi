@@ -40,7 +40,7 @@ config:
   domainName: demo.manicharanreddy.com
   lbSecurityGroupName: Load Balancer Security Group
   allowedPortsForLB: 80,443
-  outboundPortsForEC2: 443,3306
+  allowedPortsForEC2: 22,8080
   healthCheckPath: /healthz
   minInstances: 1
   maxInstances: 3

@@ -89,7 +89,7 @@ public class App {
         String domainName = config.require("domainName");
         String lbSecurityGroupName = config.require("lbSecurityGroupName");
         String[] allowedPortsForLB = config.require("allowedPortsForLB").split(",");
-        String[] outboundPortsForEC2 = config.require("outboundPortsForEC2").split(",");
+        String[] allowedPortsForEC2 = config.require("allowedPortsForEC2").split(",");
         String healthCheckPath = config.require("healthCheckPath");
         int minInstances = config.requireInteger("minInstances");
         int maxInstances = config.requireInteger("maxInstances");
@@ -154,45 +154,31 @@ public class App {
                     .securityGroupId(securityGroupForLB.id())
                     .cidrBlocks(destinationCidrPublic)
                     .build());
-            var outboundRule = new SecurityGroupRule("OutboundRuleForLBOn " + port, SecurityGroupRuleArgs.builder()
-                    .type("egress")
-                    .fromPort(port)
-                    .toPort(port)
-                    .protocol("tcp")
-                    .securityGroupId(securityGroupForLB.id())
-                    .cidrBlocks(destinationCidrPublic)
-                    .build());
         }
 
-        //adding egress for LB on application port
-        var outboundRuleforLB = new SecurityGroupRule("OutboundRuleForLBOn " + applicationPortForEC2, SecurityGroupRuleArgs.builder()
+        // All outbound rule for Load Balancer Security Group
+        var allOutboundRuleForLB = new SecurityGroupRule("AllOutboundRuleForLB ", SecurityGroupRuleArgs.builder()
                 .type("egress")
-                .fromPort(applicationPortForEC2)
-                .toPort(applicationPortForEC2)
+                .fromPort(0)
+                .toPort(0)
                 .protocol("tcp")
                 .securityGroupId(securityGroupForLB.id())
                 .cidrBlocks(destinationCidrPublic)
                 .build());
 
-        // all traffic for Application Security Group on port 22
-        var securityGroupRuleAll = new SecurityGroupRule("AllInboundRuleForEC2On " + 22, SecurityGroupRuleArgs.builder()
-                .type("ingress")
-                .fromPort(22)
-                .toPort(22)
-                .protocol("tcp")
-                .securityGroupId(securityGroupForEC2.id())
-                .cidrBlocks(destinationCidrPublic)
-                .build());
 
-        // Adding ingress on application port for Application Security Group
-        var securityGroupRule = new SecurityGroupRule("InboundRuleForEC2On " + applicationPortForEC2, SecurityGroupRuleArgs.builder()
-                .type("ingress")
-                .fromPort(applicationPortForEC2)
-                .toPort(applicationPortForEC2)
-                .protocol("tcp")
-                .sourceSecurityGroupId(securityGroupForLB.id())
-                .securityGroupId(securityGroupForEC2.id())
-                .build());
+        // Adding ingress for Application Security Group from Load Balancer Security Group
+        for (String allowedPort : allowedPortsForEC2) {
+            int port = Integer.parseInt(allowedPort);
+            var securityGroupRule = new SecurityGroupRule("InboundRuleForEC2On " + port, SecurityGroupRuleArgs.builder()
+                    .type("ingress")
+                    .fromPort(port)
+                    .toPort(port)
+                    .protocol("tcp")
+                    .sourceSecurityGroupId(securityGroupForLB.id())
+                    .securityGroupId(securityGroupForEC2.id())
+                    .build());
+        }
 
 
         // Create a Security Group for RDS Instances
@@ -211,18 +197,15 @@ public class App {
                 .securityGroupId(rdsSecurityGroup.id())
                 .build());
 
-        // Outbound rule to allow outbound traffic for EC2
-        for (String allowedPort : outboundPortsForEC2) {
-            int port = Integer.parseInt(allowedPort);
-            var outboundRule = new SecurityGroupRule("OutboundRuleForEC2On " + port, SecurityGroupRuleArgs.builder()
-                    .type("egress")
-                    .fromPort(port)
-                    .toPort(port)
-                    .protocol("tcp")
-                    .securityGroupId(securityGroupForEC2.id())
-                    .cidrBlocks(destinationCidrPublic)
-                    .build());
-        }
+        // All Outbound Rule for Application Security Group
+        var allOutboundRuleForEC2 = new SecurityGroupRule("AllOutboundRuleForEC2 ", SecurityGroupRuleArgs.builder()
+                .type("egress")
+                .fromPort(0)
+                .toPort(0)
+                .protocol("tcp")
+                .securityGroupId(securityGroupForEC2.id())
+                .cidrBlocks(destinationCidrPublic)
+                .build());
 
         // Create DB Parameter group
         ParameterGroup rdsDBParameterGroup = new ParameterGroup("rdsgroup", ParameterGroupArgs.builder()
@@ -406,7 +389,7 @@ public class App {
                     .dimensions(asg.name().applyValue(name -> Collections.singletonMap("AutoScalingGroupName", name)))
                     .build());
 
-            // alarm for scale down policy
+            // alarm for ScaleDown policy
             MetricAlarm downAlarm = new MetricAlarm("cpuLow", MetricAlarmArgs.builder()
                     .comparisonOperator("LessThanThreshold")
                     .evaluationPeriods(1)
