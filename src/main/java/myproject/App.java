@@ -161,7 +161,7 @@ public class App {
                 .type("egress")
                 .fromPort(0)
                 .toPort(0)
-                .protocol("tcp")
+                .protocol("-1")
                 .securityGroupId(securityGroupForLB.id())
                 .cidrBlocks(destinationCidrPublic)
                 .build());
@@ -202,7 +202,7 @@ public class App {
                 .type("egress")
                 .fromPort(0)
                 .toPort(0)
-                .protocol("tcp")
+                .protocol("-1")
                 .securityGroupId(securityGroupForEC2.id())
                 .cidrBlocks(destinationCidrPublic)
                 .build());
@@ -268,12 +268,14 @@ public class App {
             // User Data Script
             Output<String> userDataScript = rdsInstance.address().applyValue(v -> String.format(
                     "#!/bin/bash\n" +
+                            "az=`curl http://169.254.169.254/latest/meta-data/placement/availability-zone`\n" +
                             "sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/cloudwatch-config.json -s\n" +
-                            "echo 'export DB_User=%s' >> /opt/csye6225/application.properties\n" +
-                            "echo 'export DB_Password=%s' >> /opt/csye6225/application.properties\n" +
-                            "echo 'export DB_Host=%s' >> /opt/csye6225/application.properties\n" +
-                            "echo 'export DB_Port=%s' >> /opt/csye6225/application.properties\n" +
-                            "echo 'export DB_Database=%s' >> /opt/csye6225/application.properties\n",
+                            "echo \"AvailabilityZone=$az\" >> /opt/csye6225/application.properties\n" +
+                            "echo 'DBUser=%s' >> /opt/csye6225/application.properties\n" +
+                            "echo 'DBPassword=%s' >> /opt/csye6225/application.properties\n" +
+                            "echo 'DBHost=%s' >> /opt/csye6225/application.properties\n" +
+                            "echo 'DBPort=%s' >> /opt/csye6225/application.properties\n" +
+                            "echo 'DBDatabase=%s' >> /opt/csye6225/application.properties\n",
                     rdsUsername, rdsPassword, v, databasePort, rdsDBName
             ));
 
@@ -384,7 +386,7 @@ public class App {
                     .namespace("AWS/EC2")
                     .period(60)
                     .statistic("Average")
-                    .threshold(3.0)
+                    .threshold(10.0)
                     .alarmActions(upPolicy.arn().applyValue(Collections::singletonList))
                     .dimensions(asg.name().applyValue(name -> Collections.singletonMap("AutoScalingGroupName", name)))
                     .build());
@@ -397,7 +399,7 @@ public class App {
                     .namespace("AWS/EC2")
                     .period(60)
                     .statistic("Average")
-                    .threshold(2.0)
+                    .threshold(5.0)
                     .alarmActions(downPolicy.arn().applyValue(Collections::singletonList))
                     .dimensions(asg.name().applyValue(name -> Collections.singletonMap("AutoScalingGroupName", name)))
                     .build());
