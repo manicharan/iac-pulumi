@@ -33,6 +33,8 @@ import com.pulumi.aws.route53.Record;
 import com.pulumi.aws.route53.RecordArgs;
 import com.pulumi.aws.route53.inputs.RecordAliasArgs;
 import com.pulumi.core.Output;
+import com.pulumi.gcp.storage.Bucket;
+import com.pulumi.gcp.storage.BucketArgs;
 
 import java.util.*;
 
@@ -179,7 +181,7 @@ public class App {
                     .securityGroupId(securityGroupForEC2.id())
                     .build());
         }
-
+        
 
         // Create a Security Group for RDS Instances
         var rdsSecurityGroup = new SecurityGroup(rdsSecurityGroupName, SecurityGroupArgs.builder()
@@ -454,6 +456,17 @@ public class App {
                             .evaluateTargetHealth(true)
                             .build())
                     .build());
+
+
+            // Google Cloud code
+
+            //creating a bucket
+            var bucket = new Bucket("bucket-for-lambda",
+                    BucketArgs.builder()
+                            .location("US")
+                            .forceDestroy(true)
+                            .build());
+//            ctx.export("bucketName", bucket.url());
 
             return null;
         });

@@ -48,3 +48,6 @@ config:
   instanceWarmUpTime: 120
   loadBalancerType: application
   metricName: CPUUtilization
+
+  # GCP goes here
+  gcp:project: dev1269
