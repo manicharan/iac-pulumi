@@ -32,6 +32,8 @@ import com.pulumi.aws.rds.SubnetGroupArgs;
 import com.pulumi.aws.route53.Record;
 import com.pulumi.aws.route53.RecordArgs;
 import com.pulumi.aws.route53.inputs.RecordAliasArgs;
+import com.pulumi.aws.sns.Topic;
+import com.pulumi.aws.sns.TopicArgs;
 import com.pulumi.core.Output;
 import com.pulumi.gcp.storage.Bucket;
 import com.pulumi.gcp.storage.BucketArgs;
@@ -267,18 +269,25 @@ public class App {
                     .tags(Map.of("Name", "myRDSInstance"))
                     .build());
 
+
+            var topic = new Topic("testSNS", TopicArgs.builder()
+                    .build());
+            String snstopic = "arn:aws:sns:us-east-1:465753238257:testSNS";
+
             // User Data Script
             Output<String> userDataScript = rdsInstance.address().applyValue(v -> String.format(
                     "#!/bin/bash\n" +
                             "az=`curl http://169.254.169.254/latest/meta-data/placement/availability-zone`\n" +
                             "sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/cloudwatch-config.json -s\n" +
                             "echo \"AvailabilityZone=$az\" >> /opt/csye6225/application.properties\n" +
+                            "echo 'snsTopicArn=%s' >> /opt/csye6225/application.properties\n" +
+                            "echo 'awsRegion=%s' >> /opt/csye6225/application.properties\n" +
                             "echo 'DBUser=%s' >> /opt/csye6225/application.properties\n" +
                             "echo 'DBPassword=%s' >> /opt/csye6225/application.properties\n" +
                             "echo 'DBHost=%s' >> /opt/csye6225/application.properties\n" +
                             "echo 'DBPort=%s' >> /opt/csye6225/application.properties\n" +
                             "echo 'DBDatabase=%s' >> /opt/csye6225/application.properties\n",
-                    rdsUsername, rdsPassword, v, databasePort, rdsDBName
+                    snstopic, awsRegion, rdsUsername, rdsPassword, v, databasePort, rdsDBName
             ));
 
             Output<String> encodedUserData = userDataScript.applyValue(data -> {
