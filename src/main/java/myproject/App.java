@@ -2,6 +2,7 @@ package myproject;
 
 import com.pulumi.Context;
 import com.pulumi.Pulumi;
+import com.pulumi.asset.FileArchive;
 import com.pulumi.aws.AwsFunctions;
 import com.pulumi.aws.autoscaling.Group;
 import com.pulumi.aws.autoscaling.GroupArgs;
@@ -20,6 +21,8 @@ import com.pulumi.aws.iam.inputs.GetPolicyDocumentStatementArgs;
 import com.pulumi.aws.iam.inputs.GetPolicyDocumentStatementPrincipalArgs;
 import com.pulumi.aws.iam.outputs.GetPolicyDocumentResult;
 import com.pulumi.aws.inputs.GetAvailabilityZonesArgs;
+import com.pulumi.aws.lambda.*;
+import com.pulumi.aws.lambda.inputs.FunctionEnvironmentArgs;
 import com.pulumi.aws.lb.*;
 import com.pulumi.aws.lb.inputs.ListenerDefaultActionArgs;
 import com.pulumi.aws.lb.inputs.TargetGroupHealthCheckArgs;
@@ -34,9 +37,14 @@ import com.pulumi.aws.route53.RecordArgs;
 import com.pulumi.aws.route53.inputs.RecordAliasArgs;
 import com.pulumi.aws.sns.Topic;
 import com.pulumi.aws.sns.TopicArgs;
+import com.pulumi.aws.sns.TopicSubscription;
+import com.pulumi.aws.sns.TopicSubscriptionArgs;
 import com.pulumi.core.Output;
+import com.pulumi.gcp.serviceAccount.*;
 import com.pulumi.gcp.storage.Bucket;
 import com.pulumi.gcp.storage.BucketArgs;
+import com.pulumi.gcp.storage.BucketIAMBinding;
+import com.pulumi.gcp.storage.BucketIAMBindingArgs;
 
 import java.util.*;
 
@@ -101,6 +109,9 @@ public class App {
         int instanceWarmUpTime = config.requireInteger("instanceWarmUpTime");
         String loadBalancerType = config.require("loadBalancerType");
         String metricName = config.require("metricName");
+        String[] policyARN = config.require("policyARNs").split(",");
+        List<String> policyARNs = new ArrayList<>(Arrays.asList(policyARN));
+        String policyForLambda = config.require("policyForLambda");
 
         // Create a VPC
         var vpc = new Vpc(vpcName, VpcArgs.builder()
@@ -183,7 +194,6 @@ public class App {
                     .securityGroupId(securityGroupForEC2.id())
                     .build());
         }
-        
 
         // Create a Security Group for RDS Instances
         var rdsSecurityGroup = new SecurityGroup(rdsSecurityGroupName, SecurityGroupArgs.builder()
@@ -270,12 +280,12 @@ public class App {
                     .build());
 
 
-            var topic = new Topic("testSNS", TopicArgs.builder()
+            var snstopic = new Topic("SNSTopicForLambda", TopicArgs.builder()
                     .build());
-            String snstopic = "arn:aws:sns:us-east-1:465753238257:testSNS";
+            String region = config.require("region");
 
             // User Data Script
-            Output<String> userDataScript = rdsInstance.address().applyValue(v -> String.format(
+            Output<String> userDataScript = snstopic.arn().apply(arn -> rdsInstance.address().applyValue(v -> String.format(
                     "#!/bin/bash\n" +
                             "az=`curl http://169.254.169.254/latest/meta-data/placement/availability-zone`\n" +
                             "sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/cloudwatch-config.json -s\n" +
@@ -287,8 +297,8 @@ public class App {
                             "echo 'DBHost=%s' >> /opt/csye6225/application.properties\n" +
                             "echo 'DBPort=%s' >> /opt/csye6225/application.properties\n" +
                             "echo 'DBDatabase=%s' >> /opt/csye6225/application.properties\n",
-                    snstopic, awsRegion, rdsUsername, rdsPassword, v, databasePort, rdsDBName
-            ));
+                    arn, region, rdsUsername, rdsPassword, v, databasePort, rdsDBName
+            )));
 
             Output<String> encodedUserData = userDataScript.applyValue(data -> {
                 return Base64.getEncoder().encodeToString(data.getBytes());
@@ -309,12 +319,84 @@ public class App {
             //creating a role
             var cwRole = new Role(CWRoleName, RoleArgs.builder()
                     .assumeRolePolicy(instanceAssumeRolePolicy.applyValue(GetPolicyDocumentResult::json))
-                    .managedPolicyArns(ServerAgentPolicyARN)
+                    .managedPolicyArns(policyARNs)
                     .build());
 
             //creating instance profile for role
             var instanceProfile = new InstanceProfile("instanceProfile", InstanceProfileArgs.builder()
                     .role(cwRole.id())
+                    .build());
+
+            final var assumeRole = IamFunctions.getPolicyDocument(GetPolicyDocumentArgs.builder()
+                    .statements(GetPolicyDocumentStatementArgs.builder()
+                            .effect("Allow")
+                            .principals(GetPolicyDocumentStatementPrincipalArgs.builder()
+                                    .type("Service")
+                                    .identifiers("lambda.amazonaws.com")
+                                    .build())
+                            .actions("sts:AssumeRole")
+                            .build())
+                    .build());
+
+            var iamForLambda = new Role("iamForLambda", RoleArgs.builder()
+                    .assumeRolePolicy(assumeRole.applyValue(GetPolicyDocumentResult::json))
+                    .managedPolicyArns(policyForLambda)
+                    .build());
+
+            // Google Cloud code
+
+            //creating a bucket
+            var bucketForAssignment = new Bucket("assignments-bucket",
+                    BucketArgs.builder()
+                            .location("US")
+                            .forceDestroy(true)
+                            .build());
+//            ctx.export("bucketName", bucket.url());
+
+            var serviceAccount = new Account("serviceAccountForLambda", AccountArgs.builder()
+                    .accountId("service-account-id")
+                    .displayName("Service Account For Lambda")
+                    .build());
+
+            var storageBinding = new BucketIAMBinding("storageAdminForLambda", BucketIAMBindingArgs.builder()
+                    .role("roles/storage.admin")
+                    .members(serviceAccount.email().applyValue(email -> "serviceAccount:" + email).applyValue(Collections::singletonList))
+                    .bucket(bucketForAssignment.id())
+//                    .serviceAccountId(serviceAccount.id())
+                    .build());
+
+            var myKey = new Key("serviceKeyForLambda", KeyArgs.builder()
+                    .serviceAccountId(serviceAccount.name())
+                    .build());
+
+            Output<Map<String, String>> envVariables = myKey.privateKey().apply(k->bucketForAssignment.name().applyValue(bucket -> {
+                Map<String, String> env = new HashMap<>();
+                env.put("bucketName", bucket);
+                env.put("GOOGLE_SERVICE_ACCOUNT_KEY",k);
+                return env;
+            }));
+
+            var lambdaFunction = new Function("LambdaFunction", FunctionArgs.builder()
+                    .code(new FileArchive("C:\\Users\\manic\\Cloud\\lambda_function\\lambda_function.zip"))
+                    .role(iamForLambda.arn())
+                    .handler("lambda.lambda_handler")
+                    .runtime("python3.10")
+                    .environment(FunctionEnvironmentArgs.builder()
+                            .variables(envVariables)
+                            .build())
+                    .build());
+
+            var snsTopicSubscription = new TopicSubscription("SNSTopicSubscriptionForLambda", TopicSubscriptionArgs.builder()
+                    .topic(snstopic.arn())
+                    .protocol("lambda")
+                    .endpoint(lambdaFunction.arn())
+                    .build());
+
+            var permissionForSNS = new Permission("PermissionForSNS", PermissionArgs.builder()
+                    .action("lambda:InvokeFunction")
+                    .function(lambdaFunction.name())
+                    .principal("sns.amazonaws.com")
+                    .sourceArn(snstopic.arn())
                     .build());
 
             // creating launch template for EC2
@@ -465,17 +547,6 @@ public class App {
                             .evaluateTargetHealth(true)
                             .build())
                     .build());
-
-
-            // Google Cloud code
-
-            //creating a bucket
-            var bucket = new Bucket("bucket-for-lambda",
-                    BucketArgs.builder()
-                            .location("US")
-                            .forceDestroy(true)
-                            .build());
-//            ctx.export("bucketName", bucket.url());
 
             return null;
         });

@@ -1,6 +1,7 @@
 config:
   aws:profile: dev
   aws:region: us-east-1
+  region: us-east-1
   cidrBlock: 10.0.0.0/16
   vpcName: vpcMani
   internetGatewayName: igwMani
@@ -21,7 +22,7 @@ config:
   deviceName: /dev/xvda
   instanceType: t2.micro
   volumeType: gp2
-  ec2Name: webapp
+  ec2Name: webapp3
   rdsSecurityGroupName: Database Security Group
   databasePort: 3306
   instanceIdentifier: csye6225
@@ -48,6 +49,8 @@ config:
   instanceWarmUpTime: 120
   loadBalancerType: application
   metricName: CPUUtilization
+  policyARNs: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy,arn:aws:iam::aws:policy/AmazonSNSFullAccess
+  policyForLambda: arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   # GCP goes here
   gcp:project: dev1269
