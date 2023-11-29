@@ -16,13 +16,13 @@ config:
   num_of_subnets: 3
   applicationPortForEC2: 8080
   volume: 25
-  amiId: ami-06fe01417a3e9d1fe
+  amiId: ami-0cd8ddf158a9a9548
   sshKeyName: packer_dev
   ec2SecurityGroupName: Application Security Group
   deviceName: /dev/xvda
   instanceType: t2.micro
   volumeType: gp2
-  ec2Name: webapp3
+  ec2Name: webapp
   rdsSecurityGroupName: Database Security Group
   databasePort: 3306
   instanceIdentifier: csye6225
@@ -50,7 +50,8 @@ config:
   loadBalancerType: application
   metricName: CPUUtilization
   policyARNs: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy,arn:aws:iam::aws:policy/AmazonSNSFullAccess
-  policyForLambda: arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  policyForLambda: arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole,arn:aws:iam::aws:policy/AmazonSESFullAccess,arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+  SenderEmailAddress: no-reply@dev.manicharanreddy.com
 
   # GCP goes here
   gcp:project: dev1269

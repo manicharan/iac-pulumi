@@ -13,6 +13,10 @@ import com.pulumi.aws.autoscaling.inputs.GroupLaunchTemplateArgs;
 import com.pulumi.aws.autoscaling.inputs.PolicyStepAdjustmentArgs;
 import com.pulumi.aws.cloudwatch.MetricAlarm;
 import com.pulumi.aws.cloudwatch.MetricAlarmArgs;
+import com.pulumi.aws.dynamodb.Table;
+import com.pulumi.aws.dynamodb.TableArgs;
+import com.pulumi.aws.dynamodb.inputs.TableAttributeArgs;
+import com.pulumi.aws.dynamodb.inputs.TableGlobalSecondaryIndexArgs;
 import com.pulumi.aws.ec2.*;
 import com.pulumi.aws.ec2.inputs.*;
 import com.pulumi.aws.iam.*;
@@ -111,7 +115,10 @@ public class App {
         String metricName = config.require("metricName");
         String[] policyARN = config.require("policyARNs").split(",");
         List<String> policyARNs = new ArrayList<>(Arrays.asList(policyARN));
-        String policyForLambda = config.require("policyForLambda");
+        String[] policyARNForLambda = config.require("policyForLambda").split(",");
+        List<String> policyForLambda = new ArrayList<>(Arrays.asList(policyARNForLambda));
+        String SenderEmailAddress = config.require("SenderEmailAddress");
+        String region = config.require("region");
 
         // Create a VPC
         var vpc = new Vpc(vpcName, VpcArgs.builder()
@@ -279,10 +286,8 @@ public class App {
                     .tags(Map.of("Name", "myRDSInstance"))
                     .build());
 
-
             var snstopic = new Topic("SNSTopicForLambda", TopicArgs.builder()
                     .build());
-            String region = config.require("region");
 
             // User Data Script
             Output<String> userDataScript = snstopic.arn().apply(arn -> rdsInstance.address().applyValue(v -> String.format(
@@ -359,26 +364,60 @@ public class App {
                     .build());
 
             var storageBinding = new BucketIAMBinding("storageAdminForLambda", BucketIAMBindingArgs.builder()
-                    .role("roles/storage.admin")
+                    .role("roles/storage.objectCreator")
                     .members(serviceAccount.email().applyValue(email -> "serviceAccount:" + email).applyValue(Collections::singletonList))
                     .bucket(bucketForAssignment.id())
-//                    .serviceAccountId(serviceAccount.id())
                     .build());
 
             var myKey = new Key("serviceKeyForLambda", KeyArgs.builder()
                     .serviceAccountId(serviceAccount.name())
                     .build());
 
-            Output<Map<String, String>> envVariables = myKey.privateKey().apply(k->bucketForAssignment.name().applyValue(bucket -> {
+            var dynamoDB = new Table("EmailTrackingTable", TableArgs.builder()
+                    .attributes(TableAttributeArgs.builder()
+                                    .name("Email")
+                                    .type("S")
+                                    .build(),
+                            TableAttributeArgs.builder()
+                                    .name("Timestamp")
+                                    .type("S")
+                                    .build(),
+                            TableAttributeArgs.builder()
+                                    .name("Submission_id")
+                                    .type("S")
+                                    .build(),
+                            TableAttributeArgs.builder()
+                                    .name("Status")
+                                    .type("S")
+                                    .build())
+                    .hashKey("Email")
+                    .rangeKey("Timestamp")
+                    .globalSecondaryIndexes(TableGlobalSecondaryIndexArgs.builder()
+                            .name("SubmissionId_Status")
+                            .hashKey("Submission_id")
+                            .rangeKey("Status")
+                            .readCapacity(5)
+                            .writeCapacity(5)
+                            .projectionType("ALL")
+                            .build())
+                    .readCapacity(5)
+                    .writeCapacity(5)
+                    .build());
+
+            Output<Map<String, String>> envVariables = dynamoDB.name().apply(name->myKey.privateKey().apply(k -> bucketForAssignment.name().applyValue(bucket -> {
                 Map<String, String> env = new HashMap<>();
                 env.put("bucketName", bucket);
-                env.put("GOOGLE_SERVICE_ACCOUNT_KEY",k);
+                env.put("GOOGLE_SERVICE_ACCOUNT_KEY", k);
+                env.put("SenderEmailAddress", SenderEmailAddress);
+                env.put("region", region);
+                env.put("dynamoDBTable",name);
                 return env;
-            }));
+            })));
 
             var lambdaFunction = new Function("LambdaFunction", FunctionArgs.builder()
                     .code(new FileArchive("C:\\Users\\manic\\Cloud\\lambda_function\\lambda_function.zip"))
                     .role(iamForLambda.arn())
+                    .timeout(60)
                     .handler("lambda.lambda_handler")
                     .runtime("python3.10")
                     .environment(FunctionEnvironmentArgs.builder()
