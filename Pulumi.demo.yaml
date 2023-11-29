@@ -1,6 +1,7 @@
 config:
   aws:profile: demo
   aws:region: us-east-1
+  region: us-east-1
   cidrBlock: 10.0.0.0/16
   vpcName: vpcMani
   internetGatewayName: igwMani
@@ -48,3 +49,9 @@ config:
   instanceWarmUpTime: 120
   loadBalancerType: application
   metricName: CPUUtilization
+  policyARNs: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy,arn:aws:iam::aws:policy/AmazonSNSFullAccess
+  policyForLambda: arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole,arn:aws:iam::aws:policy/AmazonSESFullAccess,arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+  SenderEmailAddress: no-reply@demo.manicharanreddy.com
+
+  # GCP goes here
+  gcp:project: demo1269
