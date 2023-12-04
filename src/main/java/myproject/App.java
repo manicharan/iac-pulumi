@@ -119,6 +119,7 @@ public class App {
         List<String> policyForLambda = new ArrayList<>(Arrays.asList(policyARNForLambda));
         String SenderEmailAddress = config.require("SenderEmailAddress");
         String region = config.require("region");
+        String certificateArn = config.require("certificateArn");
 
         // Create a VPC
         var vpc = new Vpc(vpcName, VpcArgs.builder()
@@ -562,7 +563,10 @@ public class App {
             // creating a listener for load balancer
             var listener = new Listener("listenerForLB", ListenerArgs.builder()
                     .loadBalancerArn(loadBalancer.arn())
-                    .port(80)
+                    .port(443)
+                    .protocol("HTTPS")
+                    .sslPolicy("ELBSecurityPolicy-2016-08")
+                    .certificateArn(certificateArn)
                     .defaultActions(ListenerDefaultActionArgs.builder()
                             .type("forward")
                             .targetGroupArn(targetGroup.arn())

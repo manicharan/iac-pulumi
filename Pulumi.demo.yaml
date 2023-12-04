@@ -16,7 +16,7 @@ config:
   num_of_subnets: 3
   applicationPortForEC2: 8080
   volume: 25
-  amiId: ami-0d2b41d57f9bd792a
+  amiId: ami-010a37928a21c6fee
   sshKeyName: packer_ami
   ec2SecurityGroupName: Application Security Group
   deviceName: /dev/xvda
@@ -40,7 +40,7 @@ config:
   domainZoneId: Z084093412ZXVEXEGYTX6
   domainName: demo.manicharanreddy.com
   lbSecurityGroupName: Load Balancer Security Group
-  allowedPortsForLB: 80,443
+  allowedPortsForLB: 443
   allowedPortsForEC2: 22,8080
   healthCheckPath: /healthz
   minInstances: 1
@@ -52,6 +52,7 @@ config:
   policyARNs: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy,arn:aws:iam::aws:policy/AmazonSNSFullAccess
   policyForLambda: arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole,arn:aws:iam::aws:policy/AmazonSESFullAccess,arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
   SenderEmailAddress: no-reply@demo.manicharanreddy.com
+  certificateArn: arn:aws:acm:us-east-1:807352099833:certificate/ed4dcb42-7f45-4837-adc1-1d8458e670a7
 
   # GCP goes here
   gcp:project: demo1269
